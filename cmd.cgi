@@ -178,7 +178,10 @@ elsif ($in{'cmd'} =~ "zfsdestroy")  {
 	@footer = ("index.cgi?mode=zfs", $text{'zfs_return'});
 }
 elsif ($in{'cmd'} =~ "snpdestroy")  {
-	my $cmd = ($config{'snap_destroy'} =~ /1/) ? "zfs destroy $in{'force'} $in{'snapshot'}" : undef;
+	# On FreeBSD, destroy snapshots with -R to remove dependent clones
+	my $freebsd = ($^O eq 'freebsd') ? 1 : 0;
+	my $recurse_flag = $freebsd ? '-R ' : '';
+	my $cmd = ($config{'snap_destroy'} =~ /1/) ? "zfs destroy ${recurse_flag}$in{'force'} $in{'snapshot'}" : undef;
 	if (!$in{'confirm'})
 	{
 		print $text{'cmd_destroy'}." $in{'snapshot'}...<br />";
@@ -193,13 +196,12 @@ elsif ($in{'cmd'} =~ "snpdestroy")  {
 		print ui_hidden('checked', 'no');
 		if ($in{'checked'} =~ /no/) { print " <font color='red'> -- $text{'cmd_checkbox'}</font>"; }
 		print "<br /><br />";
-		print ui_submit($text{'continue'}, undef, undef),;
+		print ui_submit($text{'continue'}, undef, undef);
 		print ui_form_end();
 
 	} else {
 		ui_cmd($in{'snapshot'}, $cmd);
 	}
-	print ui_form_end();
 	%parent = find_parent($in{'snapshot'});
 	@footer = ("status.cgi?zfs=".$parent{'filesystem'}, $parent{'filesystem'});
 }
@@ -230,9 +232,6 @@ elsif ($in{'cmd'} =~ "multisnap")  {
 	@select = split(/;/, $in{'select'});
 	print "<h2>$text{'destroy'}</h2>";
 	print $text{'cmd_multisnap'}." <br />";
-	print ui_form_start('cmd.cgi', 'post');
-	print ui_hidden('cmd', 'multisnap');
-	print ui_hidden('select', $in{'select'});
 	my %results = ();
 	print ui_columns_start([ "Snapshot", "Used", "Refer" ]);
 	foreach $key (@select)
@@ -241,11 +240,17 @@ elsif ($in{'cmd'} =~ "multisnap")  {
 		my %snapshot = list_snapshots($key);
 		print ui_columns_row([ $key, $snapshot{'00000'}{used}, $snapshot{'00000'}{refer} ]);
 		#print Dumper(\%snapshot);
-		$results{$key} = ($config{'snap_destroy'}) ? "zfs destroy $key" : undef; 
+		# On FreeBSD, include -R to destroy snapshots with dependent clones
+		my $freebsd = ($^O eq 'freebsd') ? 1 : 0;
+		my $recurse_flag = $freebsd ? '-R ' : '';
+		$results{$key} = ($config{'snap_destroy'} =~ /1/) ? "zfs destroy ${recurse_flag}$key" : undef; 
 	}
 	print ui_columns_end();
 	if (!$in{'confirm'})
 	{
+		print ui_form_start('cmd.cgi', 'post');
+		print ui_hidden('cmd', 'multisnap');
+		print ui_hidden('select', $in{'select'});
 		print "<h2>$text{'cmd_issue'}</h2>";
 		foreach $key (keys %results)
 		{
@@ -257,6 +262,7 @@ elsif ($in{'cmd'} =~ "multisnap")  {
 		if ($in{'checked'} =~ /no/) { print " <font color='red'> -- $text{'cmd_checkbox'}</font>"; }
 		print "<br /><br />";
 		print ui_submit($text{'continue'}, undef, undef), " | <a href='index.cgi?mode=snapshot'>Cancel</a>";
+		print ui_form_end();
 	} else {
 		print "<h2>$text{'cmd_results'}</h2>";
 		foreach $key (keys %results)
@@ -273,7 +279,6 @@ elsif ($in{'cmd'} =~ "multisnap")  {
 			}
 		}
 	}
-	print ui_form_end();
 	@footer = ('index.cgi', $text{'index_return'});
 }
 elsif ($in{'cmd'} =~ "replace") {
