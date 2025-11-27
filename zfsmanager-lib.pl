@@ -510,7 +510,7 @@ if (!$in{'confirm'}) {
 		print ui_hidden($key, $in{$key});
 	}
 	print "<h3>Would you lke to continue?</h3>\n";
-	print ui_submit("yes", "confirm", 0)."<br />";
+	print ui_submit("yes", "confirm", "yes")."<br />";
 	print ui_form_end();
 } else {
 	@result = (`$cmd 2>&1`);
@@ -538,7 +538,7 @@ if (!$in{'confirm'}) {
                         $rv .= ui_hidden($key, $in{$key});
         }
         $rv .= "<h3>Would you lke to continue?</h3>\n";
-        $rv .= ui_submit("yes", "confirm", 0)."<br />";
+        $rv .= ui_submit("yes", "confirm", "yes")."<br />";
         $rv .= ui_form_end();
 } else {
         @result = (`$cmd 2>&1`);
