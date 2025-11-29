@@ -95,7 +95,9 @@ elsif ($in{'cmd'} =~ "rename")  {
 		$cmd = ($config{'zfs_properties'} =~ /1/) ? "zfs rename ".$in{'force'}.$in{'prnt'}.$in{'zfs'}." ".$in{'parent'}.'/'.$in{'name'} : undef;
 		if ($in{'confirm'}) { @footer = ('status.cgi?zfs='.$in{'parent'}.'/'.$in{'name'}, $in{'parent'}.'/'.$in{'name'}); }
 	}
-        ui_cmd($in{'zfs'}." to ".$in{'name'}, $cmd);
+	print ui_table_end();
+	ui_cmd($in{'zfs'}." to ".$in{'name'}, $cmd);
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} =~ "createzpool")  {
 	my %createopts = create_opts();
@@ -121,8 +123,10 @@ elsif ($in{'cmd'} =~ "vdev") {
 	ui_cmd("$in{'action'} $in{'vdev'}", $cmd);
 }
 elsif ($in{'cmd'} =~ "promote") {
+	print ui_table_end();
 	my $cmd = ($config{'zfs_properties'} =~ /1/) ? "zfs promote $in{'zfs'}": undef;
 	ui_cmd($in{'zfs'}, $cmd);
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} =~ "scrub") {
 	$in{'confirm'} = "yes";
@@ -132,25 +136,33 @@ elsif ($in{'cmd'} =~ "scrub") {
 }
 elsif ($in{'cmd'} =~ "upgrade") {
 	print "<p>".$text{'zpool_upgrade_msg'}."</p>";
+	print ui_table_end();
 	my $cmd = ($config{'pool_properties'} =~ /1/) ? "zpool upgrade $in{'pool'}" : undef;
 	ui_cmd($in{'pool'}, $cmd);
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} =~ "export") {
+	print ui_table_end();
 	my $cmd = ($config{'pool_properties'} =~ /1/) ? "zpool export $in{'pool'}" : undef;
 	ui_cmd($in{'pool'}, $cmd);
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 	@footer = ("index.cgi?mode=pools", $text{'index_return'});
 }
 elsif ($in{'cmd'} =~ "import")  {
 	my $dir = ();
 	if ($in{'dir'}) { $dir .= " -d ".$in{'dir'}; }
 	if ($in{'destroyed'}) { $dir .= " -D -f "; }
+	print ui_table_end();
 	my $cmd = ($config{'pool_properties'} =~ /1/ ) ? "zpool import".$dir." ".$in{'import'}: undef;
 	ui_cmd($in{'import'}, $cmd);
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 	@footer = ("index.cgi?mode=pools", $text{'index_return'});
 }
 elsif ($in{'cmd'} =~ "zfsact")  {
+	print ui_table_end();
 	my $cmd = ($config{'zfs_properties'} =~ /1/) ? "zfs $in{'action'} $in{'zfs'}" : undef;
 	ui_cmd("$in{'action'} $in{'zfs'}", $cmd);
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} =~ "zfsdestroy")  {
 	my $cmd = ($config{'zfs_destroy'} =~ /1/) ? "zfs destroy $in{'force'} $in{'zfs'}" : undef;

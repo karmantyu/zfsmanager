@@ -366,13 +366,23 @@ sub ui_zpool_list
 {
 my ($pool, $action)=@_;
 my %zpool = list_zpools($pool);
+my %zfs_info = list_zfs($pool);
 if ($action eq undef) { $action = "status.cgi?pool="; }
 @props = split(/,/, $config{list_zpool});
 print ui_columns_start([ "pool name", @props ]);
 foreach $key (sort(keys %zpool))
 {
      @vals = ();
-     foreach $prop (@props) { push (@vals, $zpool{$key}{$prop}); }
+     foreach $prop (@props) {
+         my $val = $zpool{$key}{$prop};
+         # Add real available size from zfs list in brackets for size/free columns
+         if (($prop eq 'size') && ($zfs_info{$key}{'used'})) {
+             $val .= " (accesible: ".$zfs_info{$key}{'used'}.")";
+         } elsif (($prop eq 'free') && ($zfs_info{$key}{'avail'})) {
+             $val .= " (available: ".$zfs_info{$key}{'avail'}.")";
+         }
+         push (@vals, $val);
+     }
      print ui_columns_row(["<a href='$action$key'>$key</a>", @vals ]);
 }
 print ui_columns_end();
@@ -509,8 +519,9 @@ if (!$in{'confirm'}) {
 	foreach $key (keys %in) {
 		print ui_hidden($key, $in{$key});
 	}
-	print "<h3>Would you like to continue?</h3>\n";
-	print ui_submit("yes", "confirm", "yes")."<br />";
+	print ui_hidden('confirm', 'yes');
+	print "<h3>Would you lke to continue?</h3>\n";
+	print ui_submit("yes")."<br />";
 	print ui_form_end();
 } else {
 	@result = (`$cmd 2>&1`);
@@ -537,8 +548,8 @@ if (!$in{'confirm'}) {
         foreach $key (keys %in) {
                         $rv .= ui_hidden($key, $in{$key});
         }
-        $rv .= "<h3>Would you like to continue?</h3>\n";
-        $rv .= ui_submit("yes", "confirm", "yes")."<br />";
+        $rv .= "<h3>Would you lke to continue?</h3>\n";
+        $rv .= ui_submit("yes", "confirm", 0)."<br />";
         $rv .= ui_form_end();
 } else {
         @result = (`$cmd 2>&1`);
