@@ -219,24 +219,26 @@ elsif ($in{'cmd'} =~ "snpdestroy")  {
 }
 elsif ($in{'cmd'} =~ "pooldestroy")  {
 my $cmd = ($config{'pool_destroy'} =~ /1/) ? "zpool destroy $in{'pool'}" : undef;
+	print ui_table_end();
 	if (!$in{'confirm'})
 	{
 		print $text{'cmd_destroy'}." $in{'pool'}... <br />";
-		print ui_form_start('cmd.cgi', 'post');
-		print ui_hidden('cmd', 'pooldestroy');
-		print ui_hidden('pool', $in{'pool'});
 		print "<b>$text{'cmd_affect'} </b><br />";
 		ui_zfs_list('-r '.$in{'pool'});
 		ui_list_snapshots('-r '.$in{'pool'});
 		print "<h3>$text{'cmd_warning'}</h3>";
-		print ui_checkbox('confirm', 'yes', $text{'cmd_understand'}, undef );
-		print ui_hidden('checked', 'no');
-		if ($in{'checked'} =~ /no/) { print " <font color='red'> -- $text{'cmd_checkbox'}</font>"; }
+		print ui_form_start('cmd.cgi', 'post');
+		print ui_hidden('cmd', 'pooldestroy');
+		print ui_hidden('pool', $in{'pool'});
+		print ui_hidden('confirm', 'yes');
+		print ui_checkbox('understand', 'yes', $text{'cmd_understand'}, undef );
 		print "<br /><br />";
 		print ui_submit($text{'continue'}, undef, undef);
+		print ui_form_end();
 	} else {
 		ui_cmd($in{'pool'}, $cmd);
 	}
+	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 	@footer = ("index.cgi?mode=pools", $text{'index_return'});
 }
 elsif ($in{'cmd'} =~ "multisnap")  {
