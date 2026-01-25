@@ -6,9 +6,9 @@ ui_print_header(undef, $text{'index_title'}, "", undef, 1, 1, 0, "<a href='about
 
 #start tabs
 @tabs = ();
-push(@tabs, [ "pools", "ZFS Pools", "index.cgi?mode=pools" ]);
-push(@tabs, [ "zfs", "ZFS File Systems", "index.cgi?mode=zfs" ]);
-if ($config{'show_snap'} =~ /1/) { push(@tabs, [ "snapshot", "Snapshots", "index.cgi?mode=snapshot" ]); }
+push(@tabs, [ "pools", "ZFS Pools", "index.cgi?mode=pools&xnavigation=1" ]);
+push(@tabs, [ "zfs", "ZFS File Systems", "index.cgi?mode=zfs&xnavigation=1" ]);
+if ($config{'show_snap'} =~ /1/) { push(@tabs, [ "snapshot", "Snapshots", "index.cgi?mode=snapshot&xnavigation=1" ]); }
 print &ui_tabs_start(\@tabs, "mode", $in{'mode'} || $tabs[0]->[0], 1);
 
 #start pools tab
@@ -16,9 +16,9 @@ print &ui_tabs_start_tab("mode", "pools");
 
 ui_zpool_list();
 if ($config{'pool_properties'} =~ /1/) { 
-	print "<a href='create.cgi?create=zpool'>Create new pool<a/>";
+	print "<a href='create.cgi?create=zpool&xnavigation=1'>Create new pool</a>";
 	print " | ";
-	print "<a href='create.cgi?import=1'>Import pool<a/>"; 
+	print "<a href='create.cgi?import=1&xnavigation=1'>Import pool</a>"; 
 }
 print &ui_tabs_end_tab("mode", "pools");
 
@@ -27,7 +27,7 @@ print &ui_tabs_start_tab("mode", "zfs");
 
 print "<div>"; #div tags are needed for new theme apparently
 ui_zfs_list();
-if ($config{'zfs_properties'} =~ /1/) { print "<a href='create.cgi?create=zfs'>Create file system</a>"; }
+if ($config{'zfs_properties'} =~ /1/) { print "<a href='create.cgi?create=zfs&xnavigation=1'>Create file system</a>"; }
 print "</div>";
 print &ui_tabs_end_tab("mode", "zfs");
 
@@ -35,7 +35,7 @@ print &ui_tabs_end_tab("mode", "zfs");
 if ($config{'show_snap'} =~ /1/) {
 print &ui_tabs_start_tab("mode", "snapshot");
 ui_list_snapshots(undef, 1);
-if ($config{'snap_properties'} =~ 1) { print "<a href='create.cgi?create=snapshot'>Create snapshot</a>"; }
+if ($config{'snap_properties'} =~ 1) { print "<a href='create.cgi?create=snapshot&xnavigation=1'>Create snapshot</a>"; }
 print &ui_tabs_end_tab("mode", "snapshot");
 }
 
@@ -45,4 +45,4 @@ print &ui_tabs_end(1);
 #alerts
 print "<h3>Alerts: </h3>", get_alerts(), "";
 
-ui_print_footer("/", $text{'index'});
+ui_print_footer("index.cgi?xnavigation=1", $text{'index'});
