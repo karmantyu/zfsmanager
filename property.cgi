@@ -25,20 +25,17 @@ if ($in{'zfs'}) {
 	print "<br />";	
 }
 
-if ($props{$in{'property'}})
-{
-	print "<b>Description:</b><br />";
-	print $props{$in{'property'}};
-	print "<br />";
-	print "<br />";
+my $desc = undef;
+if ($text{'prop_'.$in{'property'}}) {
+	$desc = $text{'prop_'.$in{'property'}};
+} elsif ($props{$in{'property'}}) {
+	$desc = $props{$in{'property'}};
 }
-
-if ($text{'prop_'.$in{'property'}})
-{
-        print "<b>Description:</b><br />";
-        print $text{'prop_'.$in{'property'}};
-        print "<br />";
-        print "<br />";
+if ($desc) {
+	print "<b>Description:</b><br />";
+	print $desc;
+	print "<br />";
+	print "<br />";
 }
 print ui_table_end();
 
@@ -118,5 +115,5 @@ print ui_form_end();
 }
 
 if ($in{'zfs'} && (index($in{'zfs'}, '@') != -1)) { ui_print_footer("status.cgi?snap=$in{'zfs'}", $in{'zfs'}); }
-if ($in{'zfs'} && (index($in{'zfs'}, '@') =~ -1)) { ui_print_footer("status.cgi?zfs=$in{'zfs'}", $in{'zfs'}); }
+if ($in{'zfs'} && (index($in{'zfs'}, '@') == -1)) { ui_print_footer("status.cgi?zfs=$in{'zfs'}", $in{'zfs'}); }
 if ($in{'pool'}) { ui_print_footer("status.cgi?pool=$in{'pool'}", $in{'pool'}); }

@@ -405,9 +405,10 @@ elsif ($in{'cmd'} =~ "snpdestroy")  {
 	@footer = ("status.cgi?zfs=".$parent{'filesystem'}."&xnavigation=1", $parent{'filesystem'});
 }
 elsif ($in{'cmd'} =~ "pooldestroy")  {
+	my $q_force = ($in{'force'} && $in{'force'} =~ /-f/) ? "-f " : "";
 	my $q_pool = quotemeta($in{'pool'});
 	$q_pool =~ s/\\([.:\-])/$1/g;
-	my $cmd = "zpool destroy $q_pool";
+	my $cmd = "zpool destroy $q_force$q_pool";
 	print ui_table_end();
 	ui_cmd($in{'pool'}, $cmd, 60);
 	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );

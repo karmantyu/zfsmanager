@@ -8,7 +8,7 @@ my %fs_descriptions = (
 	'recordsize' => {
 		'128K' => '128K (General/Default)',
 		'1M' => '1M (Media/Large files)',
-		'4M' => '4M (Media/Large files)',
+		'4M' => '4M',
 		'16K' => '16K (Database)',
 		'4K' => '4K (VM)'
 	},
@@ -83,7 +83,7 @@ if ($in{'create'} =~ "zpool")
 	print ui_table_start("Device Configuration:", "width=100%", undef);
 	if (!$in{'vdev'}) { $in{'vdev'} = 'stripe'; }
 	$in{'filter_boot'} = 1 if !defined $in{'filter_boot'};
-	$in{'filter_used'} = 0 if !defined $in{'filter_used'};
+	$in{'filter_used'} = 1 if !defined $in{'filter_used'};
 	my $boot_label = $in{'filter_boot'} ? "Show Boot Disks" : "Hide Boot Disks";
 	my $boot_val   = $in{'filter_boot'} ? 0 : 1;
 	my $used_label = $in{'filter_used'} ? "Show Used Disks" : "Hide Used Disks";
@@ -495,6 +495,9 @@ EOF
 	print "<tr>";
 	print "<td valign='top' width='45%'>";
 	print "<b>Pool:</b> ".$in{'destroy_pool'}."<br /><br />";
+	print "<b>Options</b><br />";
+	print ui_checkbox("force", "-f", "Force unmount any active datasets.")."<br />";
+	print "<br />";
 	print "<b>Confirmation</b><br />";
 	print $text{'cmd_warning'}."<br />";
 	print ui_checkbox('confirm', 'yes', $text{'cmd_understand'}, undef ), "<br />";

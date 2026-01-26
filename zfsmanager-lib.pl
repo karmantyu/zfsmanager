@@ -10,7 +10,7 @@ sub properties_list
 #return hash of properties that can be set manually and their data type
 {
 my %list = ('atime' => 'boolean', 'devices' => 'boolean', 'exec' => 'boolean', 'nbmand' => 'boolean', 'readonly' => 'boolean', 'setuid' => 'boolean', 'shareiscsi' => 'boolean', 'utf8only' => 'boolean', 'vscan' => 'boolean', 'zoned' => 'boolean', 'relatime' => 'boolean', 'overlay' => 'boolean',
-			'aclinherit' => 'discard, noallow, restricted, passthrough, passthrough-x', 'aclmode' => 'discard, groupmaks, passthrough', 'casesensitivity' => 'sensitive, insensitive, mixed', 'checksum' => 'on, off, fletcher2, fletcher4, sha256', 'compression' => 'on, off, lzjb, lz4, gzip, gzip-1, gzip-2, gzip-3, gzip-4, gzip-5, gzip-6, gzip-7, gzip-8, gzip-9, zle, zstd, zstd-1, zstd-2, zstd-3, zstd-4, zstd-5, zstd-6, zstd-7, zstd-8, zstd-9, zstd-10, zstd-11, zstd-12, zstd-13, zstd-14, zstd-15, zstd-16, zstd-17, zstd-18, zstd-19', 'copies' => '1, 2, 3', 'dedup' => 'on, off, verify, sha256', 'logbias' => 'latency, throughput', 'normalization' => 'none, formC, formD, formKC, formKD', 'primarycache' => 'all, none, metadata', 'secondarycache' => 'all, none, metadata', 'snapdir' => 'hidden, visible', 'snapdev' => 'hidden, visible', 'sync' => 'standard, always, disabled', 'xattr' => 'on, off, sa', 'com.sun:auto-snapshot' => 'true, false', 'acltype' => 'noacl, posixacl', 'redundant_metadata' => 'all, most', 'recordsize' => '512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M', 'canmount' => 'on, off, noauto',
+			'aclinherit' => 'discard, noallow, restricted, passthrough, passthrough-x', 'aclmode' => 'discard, groupmask, passthrough', 'casesensitivity' => 'sensitive, insensitive, mixed', 'checksum' => 'on, off, fletcher2, fletcher4, sha256', 'compression' => 'on, off, lzjb, lz4, gzip, gzip-1, gzip-2, gzip-3, gzip-4, gzip-5, gzip-6, gzip-7, gzip-8, gzip-9, zle, zstd, zstd-1, zstd-2, zstd-3, zstd-4, zstd-5, zstd-6, zstd-7, zstd-8, zstd-9, zstd-10, zstd-11, zstd-12, zstd-13, zstd-14, zstd-15, zstd-16, zstd-17, zstd-18, zstd-19', 'copies' => '1, 2, 3', 'dedup' => 'on, off, verify, sha256', 'logbias' => 'latency, throughput', 'normalization' => 'none, formC, formD, formKC, formKD', 'primarycache' => 'all, none, metadata', 'secondarycache' => 'all, none, metadata', 'snapdir' => 'hidden, visible', 'snapdev' => 'hidden, visible', 'sync' => 'standard, always, disabled', 'xattr' => 'on, off, sa', 'com.sun:auto-snapshot' => 'true, false', 'acltype' => 'noacl, posixacl', 'redundant_metadata' => 'all, most', 'recordsize' => '512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M', 'canmount' => 'on, off, noauto',
 			'redundant_metadata' => 'all, most', 'recordsize' => '512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M, 2M, 4M', 'canmount' => 'on, off, noauto',
 			'keylocation' => 'text', 'keystatus' => 'special','quota' => 'text', 'refquota' => 'text', 'reservation' => 'text', 'refreservation' => 'text', 'volsize' => 'text', 'filesystem_limit' => 'text', 'snapshot_limit' => 'text', 
 			'mountpoint' => 'special', 'sharesmb' => 'special', 'sharenfs' => 'special', 'mounted' => 'special', 'context' => 'special', 'defcontext' => 'special', 'fscontext' => 'special', 'rootcontext' => 'special', 'volblocksize' => '512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K');
@@ -23,6 +23,23 @@ my %list = ('autoexpand' => 'boolean', 'autoreplace' => 'boolean', 'delegation' 
 			'failmode' => 'wait, continue, panic', 'feature@async_destroy' => 'enabled, disabled', 'feature@empty_bpobj' => 'enabled, disabled', 'feature@lz4_compress' => 'enabled, disabled', 'feature@embedded_data' => 'enabled, disabled', 'feature@enabled_txg' => 'enabled, disabled', 'feature@bookmarks' => 'enabled, disabled', 'feature@hole_birth' => 'enabled, disabled', 'feature@spacemap_histogram' => 'enabled, disabled', 'feature@extensible_dataset' => 'enabled, disabled', 'feature@large_blocks' => 'enabled, disabled', 'feature@filesystem_limits' => 'enabled, disabled',
 			'altroot' => 'special', 'bootfs' => 'special', 'cachefile' => 'special', 'comment' => 'special');
 return %list;
+}
+
+sub is_documented_property
+{
+my ($property) = @_;
+our %doc_props;
+if (!%doc_props) {
+	require './property-list-en.pl';
+	my %props = property_desc();
+	%doc_props = map { $_ => 1 } keys %props;
+	foreach my $key (keys %text) {
+		if ($key =~ /^prop_(.+)$/) {
+			$doc_props{$1} = 1;
+		}
+	}
+}
+return $doc_props{$property} ? 1 : 0;
 }
 
 sub create_opts #options and defaults when creating new pool or filesystem
@@ -64,9 +81,15 @@ my ($zfs, $property) = @_;
 %conf = get_zfsmanager_config();
 %zfs_props = properties_list();
 %pool_props = pool_properties_list();
-my %type = zfs_get($zfs, 'type');
-if ($type{$zfs}{type}{value} =~ 'snapshot') { return 0; } 
-elsif ((($zfs_props{$property}) && ($config{'zfs_properties'} =~ /1/)) || (($pool_props{$property}) && ($config{'pool_properties'} =~ /1/))) { return 1; }
+return 0 if (!is_documented_property($property));
+if ($zfs) {
+	my %type = zfs_get($zfs, 'type');
+	if ($type{$zfs}{type}{value} =~ 'snapshot') { return 0; }
+	if (($zfs_props{$property}) && ($config{'zfs_properties'} =~ /1/)) { return 1; }
+	return 0;
+}
+if (($pool_props{$property}) && ($config{'pool_properties'} =~ /1/)) { return 1; }
+return 0;
 }
 
 sub list_zpools
@@ -311,7 +334,7 @@ sub to_iec {
 sub zfs_get
 {
 my ($zfs, $property) = @_;
-if (~$property) {my $property="all";}
+if (!defined($property) || $property eq "") { $property = "all"; }
 my %hash=();
 my $get=`zfs get -H $property $zfs`;
 open my $fh, "<", \$get;
@@ -328,7 +351,7 @@ return %hash;
 sub zpool_get
 {
 my ($pool, $property) = @_;
-if (~$property) {my $property="all";}
+if (!defined($property) || $property eq "") { $property = "all"; }
 my %hash=();
 my $get=`zpool get -H $property $pool`;
 
@@ -646,19 +669,13 @@ sub ui_zpool_properties
 my ($pool) = @_;
 require './property-list-en.pl';
 my %hash = zpool_get($pool, "all");
-my %props =  property_desc();
-my %settable_pool_props = pool_properties_list();
-my %read_only_pool_props = get_pool_only_property_keys();
 
 my @rows = ();
 foreach $key (sort(keys %{$hash{$pool}}))
 {
-    # Filter: Show only if it's a known pool property or a feature flag
-    next if (!exists($read_only_pool_props{$key}) && !exists($settable_pool_props{$key}) && $key !~ /^feature@/);
-
 	my $label = $key;
-	# Link to editor if it's a settable property
-	if (exists($settable_pool_props{$key}) || ($props{$key}) || ($text{'prop_'.$key})) {
+	# Link to details page only if the property is documented
+	if (is_documented_property($key)) {
 		$label = '<a href="property.cgi?pool='.$pool.'&property='.$key.'&xnavigation=1">'.$key.'</a>';
 	}
 	push(@rows, [ $label, $hash{$pool}{$key}{value} ]);
@@ -759,22 +776,13 @@ my ($zfs)=@_;
 require './property-list-en.pl';
 my %hash = zfs_get($zfs, "all");
 
-# Get the list of pool-only properties to exclude them
-my %settable_pool_props = pool_properties_list();
-my %read_only_pool_props = get_pool_only_property_keys();
-
 if (!$hash{$zfs}{'com.sun:auto-snapshot'}) { $hash{$zfs}{'com.sun:auto-snapshot'}{'value'} = '-'; }
-my %props = property_desc();
-my %properties = properties_list(); # This is for settable filesystem properties
 my @rows = ();
 foreach $key (sort(keys %{$hash{$zfs}}))
 {
-    # Exclude pool-only properties and features
-    next if (exists($read_only_pool_props{$key}) || exists($settable_pool_props{$key}) || $key =~ /^feature@/);
-
 	my $label = $key;
 	my $value = $hash{$zfs}{$key}{value};
-	if (($properties{$key}) || ($props{$key}) || ($text{'prop_'.$key}))
+	if (is_documented_property($key))
 	{
 		$label = '<a href="property.cgi?zfs='.$zfs.'&property='.$key.'&xnavigation=1">'.$key.'</a>';
 		if ($key =~ 'origin') {
@@ -802,8 +810,17 @@ sub ui_properties_columns
 	foreach my $row (@$rows) {
 		my ($k, $v) = @{$row};
 		my $k_wrap = $k;
-		$k_wrap =~ s/_/_<wbr>/g;
-		$k_wrap =~ s/\@/\@<wbr>/g;
+		if ($k_wrap =~ /<a\b[^>]*>.*?<\/a>/) {
+			$k_wrap =~ s{(<a\b[^>]*>)(.*?)(</a>)}{
+				my ($pre, $text, $post) = ($1, $2, $3);
+				$text =~ s/_/_<wbr>/g;
+				$text =~ s/\@/\@<wbr>/g;
+				$pre.$text.$post;
+			}gse;
+		} else {
+			$k_wrap =~ s/_/_<wbr>/g;
+			$k_wrap =~ s/\@/\@<wbr>/g;
+		}
 
 		my $cell_content = "<div style='border:1px solid #eee; border-radius:3px; padding:4px 6px; background:#fafafa; width:100%; box-sizing:border-box; height: 100%;'>".
 						   "<div style='font-weight:600; word-break:break-all;'>".$k_wrap."</div>".
