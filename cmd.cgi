@@ -106,6 +106,16 @@ elsif ($in{'cmd'} =~ "createzfs")  {
 	my $q_zfs = quotemeta($in{'zfs'});
 	$q_zfs =~ s/\\([.:\-])/$1/g;
 	my $cmd = ($in{'parent'}) ? cmd_create_zfs($q_parent."/".$q_zfs, \%options) : undef;
+	if ($in{'add_inherit'} && $cmd) {
+		my $acl_cmd = acl_inherit_flags_cmd($q_parent."/".$q_zfs);
+		if ($acl_cmd) { $cmd .= " && ".$acl_cmd; }
+	}
+	if ($in{'add_inherit'}) {
+		my @missing = acl_inherit_missing_tools();
+		if (@missing) {
+			print "<b>Warning:</b> ACL inherit flags requested, but missing tool(s) in PATH: ".join(", ", @missing).". Flags will not be set.<br />\n";
+		}
+	}
 	$in{'confirm'} = "yes";
 	ui_cmd("$in{'parent'}/$in{'zfs'}", $cmd);
 	#print "", (!$result[1]) ? ui_zfs_list($in{'zfs'}) : undef;
@@ -141,6 +151,16 @@ elsif ($in{'cmd'} =~ "clone")  {
 	my $q_zfs = quotemeta($in{'zfs'});
 	$q_zfs =~ s/\\([.:\-])/$1/g;
 	my $cmd = "zfs clone ".$q_clone." ".$q_parent.'/'.$q_zfs." ".$opts;
+	if ($in{'add_inherit'} && $cmd) {
+		my $acl_cmd = acl_inherit_flags_cmd($q_parent."/".$q_zfs);
+		if ($acl_cmd) { $cmd .= " && ".$acl_cmd; }
+	}
+	if ($in{'add_inherit'}) {
+		my @missing = acl_inherit_missing_tools();
+		if (@missing) {
+			print "<b>Warning:</b> ACL inherit flags requested, but missing tool(s) in PATH: ".join(", ", @missing).". Flags will not be set.<br />\n";
+		}
+	}
 	ui_cmd($in{'clone'}, $cmd);
 	@footer = ("status.cgi?snap=".$in{'clone'}."&xnavigation=1", $in{'clone'})
 }
@@ -199,6 +219,16 @@ elsif ($in{'cmd'} =~ "createzpool")  {
 	%poolopts = ( 'version' => quotemeta($in{'version'}) );
 	my $cmd = (($config{'pool_properties'} =~ /1/)) ? cmd_create_zpool($q_pool, $q_vdev.$q_devs, \%options, \%poolopts, $q_force) : undef;
 	$cmd =~ s/\\(\/)/$1/g;
+	if ($in{'add_inherit'} && $cmd) {
+		my $acl_cmd = acl_inherit_flags_cmd($q_pool);
+		if ($acl_cmd) { $cmd .= " && ".$acl_cmd; }
+	}
+	if ($in{'add_inherit'}) {
+		my @missing = acl_inherit_missing_tools();
+		if (@missing) {
+			print "<b>Warning:</b> ACL inherit flags requested, but missing tool(s) in PATH: ".join(", ", @missing).". Flags will not be set.<br />\n";
+		}
+	}
 	if ($in{'dryrun'}) {
 		# Calculate estimated size
 		my $min_bytes = 0;

@@ -59,6 +59,58 @@ my %list = (
 return %list;
 }
 
+sub has_command
+{
+my ($cmd) = @_;
+return 0 if (!$cmd);
+my $rc = system("command -v $cmd >/dev/null 2>&1");
+return $rc == 0 ? 1 : 0;
+}
+
+sub acl_inherit_missing_tools
+{
+my @missing = ();
+if ($^O eq 'freebsd') {
+	push(@missing, 'getfacl') if (!has_command('getfacl'));
+	push(@missing, 'setfacl') if (!has_command('setfacl'));
+} else {
+	push(@missing, 'nfs4_getfacl') if (!has_command('nfs4_getfacl'));
+	push(@missing, 'nfs4_setfacl') if (!has_command('nfs4_setfacl'));
+}
+return @missing;
+}
+
+sub acl_inherit_flags_cmd
+{
+my ($dataset) = @_;
+return undef if (!$dataset);
+my $cmd = 'acltype=$(zfs get -H -o value acltype "' . $dataset . '" 2>/dev/null); '.
+          'mp=$(zfs get -H -o value mountpoint "' . $dataset . '" 2>/dev/null); '.
+          'if [ "$acltype" = "nfsv4" ] && [ -n "$mp" ] && '.
+          '[ "$mp" != "-" ] && [ "$mp" != "none" ]; then ';
+if ($^O eq 'freebsd') {
+	$cmd .= 'if command -v getfacl >/dev/null 2>&1 && command -v setfacl >/dev/null 2>&1; then '.
+	        'po=$(getfacl "$mp" 2>/dev/null | awk -F: "/^[[:space:]]*owner@/{print \\$2; exit}"); '.
+	        'pg=$(getfacl "$mp" 2>/dev/null | awk -F: "/^[[:space:]]*group@/{print \\$2; exit}"); '.
+	        'pe=$(getfacl "$mp" 2>/dev/null | awk -F: "/^[[:space:]]*everyone@/{print \\$2; exit}"); '.
+	        'if [ -n "$po" ] && [ -n "$pg" ] && [ -n "$pe" ]; then '.
+	        'setfacl -m "owner@:$po:fd-----:allow" -m "group@:$pg:fd-----:allow" -m "everyone@:$pe:fd-----:allow" "$mp"; '.
+	        'fi; '.
+	        'fi; ';
+} else {
+	$cmd .= 'if command -v nfs4_getfacl >/dev/null 2>&1 && command -v nfs4_setfacl >/dev/null 2>&1; then '.
+	        'po=$(nfs4_getfacl "$mp" 2>/dev/null | awk -F: "/OWNER@/{print \\$4; exit}"); '.
+	        'pg=$(nfs4_getfacl "$mp" 2>/dev/null | awk -F: "/GROUP@/{print \\$4; exit}"); '.
+	        'pe=$(nfs4_getfacl "$mp" 2>/dev/null | awk -F: "/EVERYONE@/{print \\$4; exit}"); '.
+	        'if [ -n "$po" ] && [ -n "$pg" ] && [ -n "$pe" ]; then '.
+	        'nfs4_setfacl -a "A::OWNER@:$po:fd-----:allow" -a "A::GROUP@:$pg:fd-----:allow" -a "A::EVERYONE@:$pe:fd-----:allow" "$mp"; '.
+	        'fi; '.
+	        'fi; ';
+}
+$cmd .= "fi";
+return $cmd;
+}
+
 sub get_zfsmanager_config
 {
 my $lref = &read_file_lines($module_config_file);
@@ -368,32 +420,51 @@ return %hash;
 sub zpool_imports
 {
 my ($dir, $destroyed) = @_;
-if ($dir) { $dir = '-d '.$dir; }
+our $zpool_imports_error;
+$zpool_imports_error = undef;
+my $dir_arg = "";
+if ($dir) {
+	$dir =~ s/"/\\"/g;
+	$dir_arg = "-d \"$dir\"";
+}
+my $destroyed_arg = defined($destroyed) ? "-D" : "";
 my %status = ();
-my $cmd = `zpool import $dir $destoryed`;
+my $cmdline = "zpool import $dir_arg $destroyed_arg";
+ $cmdline =~ s/\s+/ /g;
+ $cmdline =~ s/\s+$//;
+my ($exit, $timed_out, @out) = run_cmd_with_timeout($cmdline, 30);
+if ($timed_out) {
+	$zpool_imports_error = "zpool import timed out.";
+	return %status;
+}
+my $cmd = join("\n", @out);
+ if ($cmd eq "") {
+ 	$zpool_imports_error = "zpool import returned no output.";
+ }
+if ($exit != 0 && !$cmd) {
+	$zpool_imports_error = "zpool import failed.";
+}
 $count = 0;
-@pools = split(/  pool: /, $cmd);
-shift (@pools);
-foreach $cmdout (@pools) {
-	($status{$count}{pool}, $cmdout) = split(/ id: /, $cmdout);
-	chomp $status{$count}{pool};
-	$status{$count}{pool} =~ s/^\s+|\s+$//g;
-	($status{$count}{id}, $cmdout) = split(/ state: /, $cmdout);
-	chomp $status{$count}{id};
-	$status{$count}{id} =~ s/^\s+|\s+$//g;
-	if (index($cmdout, "status: ") != -1) { 
-		($status{$count}{state}, $cmdout) = split("status: ", $cmdout); 
-		($status{$count}{status}, $cmdout) = split("action: ", $cmdout); 
-		if (index($cmdout, "  see: ") != -1) { 
-			($status{$count}{action}, $cmdout) = split("  see: ", $cmdout); 
-			($status{$count}{see}, $cmdout) = split("config:\n", $cmdout); 
-		} else { ($status{$count}{action}, $cmdout) = split("config:\n", $cmdout); }
-	} else {
-		($status{$count}{state}, $cmdout) = split("action: ", $cmdout); 
-		($status{$count}{action}, $cmdout) = split("config:\n", $cmdout);
+my %current;
+foreach my $line (split(/\n/, $cmd)) {
+	if ($line =~ /^\s*pool:\s*(\S+)/) {
+		if ($current{'pool'}) {
+			$status{$count++} = { %current };
+		}
+		%current = ();
+		$current{'pool'} = $1;
 	}
-	$status{$count}{config} = $cmdout;
-$count++;
+	elsif ($line =~ /^\s*id:\s*(\S+)/) {
+		$current{'id'} = $1;
+	}
+	elsif ($line =~ /^\s*state:\s*(.+)$/) {
+		my $st = $1;
+		$st =~ s/^\s+|\s+$//g;
+		$current{'state'} = $st;
+	}
+}
+if ($current{'pool'}) {
+	$status{$count++} = { %current };
 }
 return %status;
 }
@@ -571,13 +642,17 @@ sub list_disk_ids
 			}
 
 			my $is_used = 0;
-			if ($info->{'usage'} =~ /In ZFS pool/) { $is_used = 1; }
+			my $usage_txt = $info->{'usage'} || '';
+			if ($usage_txt =~ /In ZFS pool/i) { $is_used = 1; }
+			elsif ($usage_txt =~ /ZFS label .*inactive/i) { $is_used = 0; }
+			elsif ($usage_txt =~ /Unused|No usage/i) { $is_used = 0; }
 			elsif ($info->{'format'} eq 'Swap') { $is_used = 1; }
 			elsif ($geom_partitions{$device}) { $is_used = 1; }
+			elsif ($usage_txt ne '') { $is_used = 1; }
 
 			if ($filter_used && $is_used) { next; }
 
-			if ($info->{'usage'} =~ /In ZFS pool/) {
+			if ($is_used && $usage_txt ne '') {
 				$html_label = "<span style='color:red;'>$display_device$desc [$info->{'usage'}]</span>";
 			} elsif ($info->{'format'} eq 'Swap') {
 				$html_label = "<span style='color:red;'>$display_device$desc [SWAP]</span>";
@@ -1271,8 +1346,10 @@ sub base_disk_device {
 sub build_zfs_devices_cache {
     my %pools;
     my %devices;
-    my $cmd = "zpool status 2>&1";
-    my $out = backquote_command($cmd);
+    my $out = backquote_command("zpool status -P 2>/dev/null");
+    if ($out !~ /^\s*pool:/m) {
+        $out = backquote_command("zpool status 2>&1");
+    }
     my ($current_pool, $in_config, $current_vdev_type, $current_vdev_group, 
         $is_mirrored, $is_raidz, $raidz_level, $is_single, $is_striped, $vdev_count);
     $current_vdev_type = 'data';
@@ -1330,7 +1407,10 @@ sub build_zfs_devices_cache {
             else { $is_single = 1; }
             my $device_id = $device;
             $device_id = $1 if ($device =~ /^gpt\/(.*)/);
-            $devices{$device} = {
+            my $canon = _canon_device_path($device);
+            next if (!$canon);
+            my $key = lc($canon);
+            $devices{$key} = {
                 'pool'        => $current_pool,
                 'vdev_type'   => $current_vdev_type,
                 'is_mirrored' => $is_mirrored,
@@ -1341,19 +1421,21 @@ sub build_zfs_devices_cache {
                 'vdev_group'  => $current_vdev_group,
                 'vdev_count'  => $vdev_count
             };
-            $devices{"gpt/$device"} = $devices{$device} if ($device !~ /^gpt\//);
-            $devices{"/dev/$device"} = $devices{$device};
-            if ($device !~ /^gpt\//) {
-                $devices{"/dev/gpt/$device"} = $devices{$device};
-            }
-            $devices{lc($device)} = $devices{$device};
-            if ($device !~ /^gpt\//) {
-                $devices{"gpt/" . lc($device)} = $devices{$device};
-                $devices{"/dev/gpt/" . lc($device)} = $devices{$device};
-            }
         }
     }
     return (\%pools, \%devices);
+}
+
+sub _canon_device_path {
+    my ($id) = @_;
+    return undef if (!defined $id || $id eq '');
+    my $path = $id;
+    if ($path !~ m{^/dev/} && -e "/dev/$path") {
+        $path = "/dev/$path";
+    }
+    return undef if ($path !~ m{^/dev/} || !-e $path);
+    my $canon = abs_path($path);
+    return $canon || $path;
 }
 
 sub _possible_partition_ids {
@@ -1367,13 +1449,26 @@ sub _possible_partition_ids {
         push(@ids, $short);
     }
     if ($part_name && $part_name ne '-') {
-        push(@ids, $part_name, "/dev/$part_name");
+        my $is_dev_name = ($part_name =~ /^(?:ada|da|nvd|vtbd|mmcsd|nvme\d+n\d+)p?\d+$/i);
+        if (!$is_dev_name || ($expected_name && lc($part_name) eq lc($expected_name))) {
+            push(@ids, $part_name, "/dev/$part_name");
+        }
     }
     if (defined $part_label && $part_label ne '-' && $part_label ne '(null)') {
-        push(@ids, $part_label, "gpt/$part_label", "/dev/gpt/$part_label",
-              lc($part_label), "gpt/".lc($part_label), "/dev/gpt/".lc($part_label));
-        if ($part_label =~ /^(sLOG\w+)$/) {
-            push(@ids, $1, "gpt/$1", "/dev/gpt/$1");
+        my $is_dev_label = ($part_label =~ /^(?:ada|da|nvd|vtbd|mmcsd|nvme\d+n\d+)p?\d+$/i);
+        my $expected_name;
+        if (defined $base_device && defined $part_num && length($base_device)) {
+            my $sep = ($scheme && $scheme eq 'GPT') ? 'p' : 's';
+            $expected_name = lc($base_device . $sep . $part_num);
+        }
+        my $part_name_lc = $part_name ? lc($part_name) : undef;
+        if (!$is_dev_label || ($part_name_lc && lc($part_label) eq $part_name_lc) ||
+            ($expected_name && lc($part_label) eq $expected_name)) {
+            push(@ids, $part_label, "gpt/$part_label", "/dev/gpt/$part_label",
+                  lc($part_label), "gpt/".lc($part_label), "/dev/gpt/".lc($part_label));
+            if ($part_label =~ /^(sLOG\w+)$/) {
+                push(@ids, $1, "gpt/$1", "/dev/gpt/$1");
+            }
         }
     }
     return @ids;
@@ -1382,12 +1477,88 @@ sub _possible_partition_ids {
 sub _find_in_zfs {
     my ($zfs_devices, @ids) = @_;
     foreach my $id (@ids) {
-        my $nid = lc($id);
-        if ($zfs_devices->{$nid}) {
-            return $zfs_devices->{$nid};
-        }
+        my $canon = _canon_device_path($id);
+        next if (!$canon);
+        my $nid = lc($canon);
+        if ($zfs_devices->{$nid}) { return $zfs_devices->{$nid}; }
     }
     return undef;
+}
+
+our %_pool_guid_map;
+our $pool_guid_loaded = 0;
+sub imported_pools_by_guid {
+    if ($pool_guid_loaded) { return %_pool_guid_map; }
+    my $out = backquote_command("zpool list -H -o name,guid 2>/dev/null");
+    foreach my $line (split(/\n/, $out)) {
+        $line =~ s/^\s+|\s+$//g;
+        next if (!$line);
+        my ($name, $guid) = split(/\s+/, $line, 2);
+        next if (!$name || !$guid);
+        $guid =~ s/\s+//g;
+        $_pool_guid_map{$guid} = $name;
+        if ($guid =~ /^0x[0-9a-f]+$/i) {
+            eval {
+                require Math::BigInt;
+                my $bi = Math::BigInt->from_hex($guid);
+                $_pool_guid_map{$bi->bstr()} = $name if $bi;
+            };
+        }
+    }
+    $pool_guid_loaded = 1;
+    return %_pool_guid_map;
+}
+
+
+our %_zdb_label_cache;
+sub zdb_label_info {
+    my ($dev) = @_;
+    return $zdb_label_cache{$dev} if (exists $zdb_label_cache{$dev});
+    my $out = backquote_command("zdb -l $dev 2>/dev/null");
+    if ($out =~ /pool_guid:\s+(\d+)/) {
+        my $guid = $1;
+        my ($name) = $out =~ /name:\s+'([^']+)'/;
+        my $info = { guid => $guid, name => $name };
+        $zdb_label_cache{$dev} = $info;
+        return $info;
+    }
+    $zdb_label_cache{$dev} = undef;
+    return undef;
+}
+
+sub _zfs_usage_role_from_zdev {
+    my ($zdev) = @_;
+    my $inzfs_txt   = $text{'disk_inzfs'} || 'In ZFS pool';
+    my $z_mirror    = $text{'disk_zfs_mirror'} || 'ZFS Mirror';
+    my $z_stripe    = $text{'disk_zfs_stripe'} || 'ZFS Stripe';
+    my $z_single    = $text{'disk_zfs_single'} || 'ZFS Data';
+    my $z_data      = $text{'disk_zfs_data'} || 'ZFS Data';
+    my $z_log       = $text{'disk_zfs_log'} || 'ZFS Log';
+    my $z_cache     = $text{'disk_zfs_cache'} || 'ZFS Cache';
+    my $z_spare     = $text{'disk_zfs_spare'} || 'ZFS Spare';
+
+    my $usage  = $inzfs_txt . ' ' . $zdev->{'pool'};
+    my $role   = $z_data;
+    my $vt  = $zdev->{'vdev_type'};
+    my $cnt = $zdev->{'vdev_count'} || 0;
+    if ($vt eq 'log') { $role = $z_log; }
+    elsif ($vt eq 'cache') { $role = $z_cache; }
+    elsif ($vt eq 'spare') { $role = $z_spare; }
+    elsif ($zdev->{'is_mirrored'}) {
+        $role = $z_mirror;
+        $role .= " ($cnt in group)" if $cnt;
+    }
+    elsif ($zdev->{'is_raidz'}) {
+        my $lvl = $zdev->{'raidz_level'} || 1;
+        $role = 'RAID-Z' . $lvl;
+        $role .= " ($cnt in group)" if $cnt;
+    }
+    elsif ($zdev->{'is_striped'}) {
+        $role = $z_stripe;
+        $role .= " ($cnt in group)" if $cnt;
+    }
+    elsif ($zdev->{'is_single'}) { $role = $z_single; }
+    return ($usage, $role);
 }
 
 sub classify_partition_row {
@@ -1408,6 +1579,41 @@ sub classify_partition_row {
     my ($format, $usage, $role) = ('-', $text{'part_nouse'} || 'Unused', '-');
     my $raw = lc($args{'entry_rawtype'} || '');
     my $t   = lc($type_desc || '');
+    my $is_zfs_type = ($raw eq '516e7cba-6ecf-11d6-8ff8-00022d09712b' ||
+                       $t =~ /zfs/ || ($args{'entry_part_type'}||'') =~ /zfs/i);
+
+    if ($is_zfs_type && has_command('zdb')) {
+        my $dev_path;
+        if ($args{'part_name'}) {
+            $dev_path = "/dev/".$args{'part_name'};
+        } elsif ($args{'base_device'} && defined $args{'part_num'}) {
+            my $sep = ($args{'scheme'} && $args{'scheme'} eq 'GPT') ? 'p' : 's';
+            $dev_path = "/dev/".$args{'base_device'}.$sep.$args{'part_num'};
+        }
+        my $canon = $dev_path ? _canon_device_path($dev_path) : undef;
+        if ($canon) {
+            my $info = zdb_label_info($canon);
+            if ($info && $info->{'guid'}) {
+                my %guid_map = imported_pools_by_guid();
+                my $pool_name = $guid_map{$info->{'guid'}};
+                $format = ($^O eq 'linux') ? 'ZFS' : 'FreeBSD ZFS';
+                my $z_data = $text{'disk_zfs_data'} || 'ZFS Data';
+                if ($pool_name) {
+                    my $inzfs_txt = $text{'disk_inzfs'} || 'In ZFS pool';
+                    $usage = $inzfs_txt.' '.$pool_name;
+                    $role = $z_data;
+                    if ($zdev && $zdev->{'pool'} eq $pool_name) {
+                        (undef, $role) = _zfs_usage_role_from_zdev($zdev);
+                    }
+                } else {
+                    my $label = $info->{'name'} || 'unknown';
+                    $usage = "ZFS label $label is inactive, former member of pool $label";
+                    $role = $z_data;
+                }
+                return ($format, $usage, $role);
+            }
+        }
+    }
     my %boot_guid = map { $_ => 1 } qw(
         c12a7328-f81f-11d2-ba4b-00a0c93ec93b
         21686148-6449-6e6f-744e-656564454649
@@ -1440,35 +1646,7 @@ sub classify_partition_row {
     }
     if ($zdev) {
         $format = ($^O eq 'linux') ? 'ZFS' : 'FreeBSD ZFS';
-        my $inzfs_txt   = $text{'disk_inzfs'} || 'In ZFS pool';
-        my $z_mirror    = $text{'disk_zfs_mirror'} || 'ZFS Mirror';
-        my $z_stripe    = $text{'disk_zfs_stripe'} || 'ZFS Stripe';
-        my $z_single    = $text{'disk_zfs_single'} || 'ZFS Data';
-        my $z_data      = $text{'disk_zfs_data'} || 'ZFS Data';
-        my $z_log       = $text{'disk_zfs_log'} || 'ZFS Log';
-        my $z_cache     = $text{'disk_zfs_cache'} || 'ZFS Cache';
-        my $z_spare     = $text{'disk_zfs_spare'} || 'ZFS Spare';
-        $usage  = $inzfs_txt . ' ' . $zdev->{'pool'};
-        my $vt  = $zdev->{'vdev_type'};
-        my $cnt = $zdev->{'vdev_count'} || 0;
-        if ($vt eq 'log') { $role = $z_log; }
-        elsif ($vt eq 'cache') { $role = $z_cache; }
-        elsif ($vt eq 'spare') { $role = $z_spare; }
-        elsif ($zdev->{'is_mirrored'}) {
-            $role = $z_mirror;
-            $role .= " ($cnt in group)" if $cnt;
-        }
-        elsif ($zdev->{'is_raidz'}) {
-            my $lvl = $zdev->{'raidz_level'} || 1;
-            $role = 'RAID-Z' . $lvl;
-            $role .= " ($cnt in group)" if $cnt;
-        }
-        elsif ($zdev->{'is_striped'}) {
-            $role = $z_stripe;
-            $role .= " ($cnt in group)" if $cnt;
-        }
-        elsif ($zdev->{'is_single'}) { $role = $z_single; }
-        else { $role = $z_data; }
+        ($usage, $role) = _zfs_usage_role_from_zdev($zdev);
         return ($format, $usage, $role);
     }
 
@@ -1505,6 +1683,12 @@ sub classify_partition_row {
             $format = 'Swap';
             $usage = $text{'disk_swap'} || 'Swap device';
             $role = $text{'disk_swap_role'} || 'Swap memory';
+        }
+    }
+    if ($usage =~ /Unused|No usage/i) {
+        if ($format ne '-' && $format !~ /ZFS/i && $format ne 'Swap') {
+            $usage = "In use ($format)";
+            $role = $format if ($role eq '-');
         }
     }
     return ($format, $usage, $role);

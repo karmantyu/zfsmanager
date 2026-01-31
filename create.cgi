@@ -74,9 +74,18 @@ if ($in{'create'} =~ "zpool")
 			my $label = $fs_descriptions{$key}{$opt} || $opt;
 			push(@options, [$opt, $label]);
 		}
+		my $default_val = $createopts{$key} || 'default';
+		my %opt_seen = map { $_->[0] => 1 } @options;
+		if ($default_val ne 'default' && !$opt_seen{$default_val}) {
+			my $label = $fs_descriptions{$key}{$default_val} || $default_val;
+			push(@options, [$default_val, $label]);
+		}
 		my $help = $acl_tooltips{$key} ? "<br><small><i>$acl_tooltips{$key}</i></small>" : "";
-		print ui_table_row($key.': ', ui_select($key, 'default', \@options, 1, 0, 1)." (default: ".$createopts{$key}.")".$help);
+		my $selected = defined($in{$key}) ? $in{$key} : $default_val;
+		print ui_table_row($key.': ', ui_select($key, $selected, \@options, 1, 0, 1).$help);
 	}
+	my $add_inherit_default = defined($in{'add_inherit'}) ? $in{'add_inherit'} : 1;
+	print ui_table_row('ACL inherit flags:', ui_checkbox('add_inherit', 1, 'Add :fd to base NFSv4 ACL entries', $add_inherit_default));
 	print ui_table_end();
 
 	# Section 3: Device Configuration
@@ -98,6 +107,14 @@ if ($in{'create'} =~ "zpool")
 	foreach my $label (sort keys %{$disks->{byid}}) {
 		push @disk_opts, [ $disks->{byid}->{$label}, $label ];
 	}
+	my $max_label_len = 0;
+	foreach my $opt (@disk_opts) {
+		my $label = $opt->[1];
+		$label =~ s/<[^>]*>//g;
+		my $len = length($label);
+		$max_label_len = $len if ($len > $max_label_len);
+	}
+	my $select_style = "style='width:100%; min-width:${max_label_len}ch'";
 	my @selected_disks = split(/\0|;/, $in{'devs'});
 	my %sel_map = map { $_ => 1 } @selected_disks;
 	my @avail_opts;
@@ -112,14 +129,10 @@ if ($in{'create'} =~ "zpool")
 	print ui_table_row("Disks", 
 		"<table width='100%'>
 		<tr><td><b>Available</b><br>" .
-		ui_select("devs_avail", undef, \@avail_opts, 10, 1, 0, 0, "style='width:100%'") . 
-		"</td></tr>" .
-		"<tr><td align='center'>" .
-		"<button type='button' onClick='moveDisks(this.form.devs_avail, this.form.devs)'>&darr; Add</button> " .
-		"<button type='button' onClick='moveDisks(this.form.devs, this.form.devs_avail)'>&uarr; Remove</button>" .
+		ui_select("devs_avail", undef, \@avail_opts, 10, 1, 0, 0, "$select_style onclick='moveDisks(this, this.form.devs)'") . 
 		"</td></tr>" .
 		"<tr><td><b>Selected</b><br>" .
-		ui_select("devs", undef, \@sel_opts_full, 10, 1, 0, 0, "style='width:100%'") . 
+		ui_select("devs", undef, \@sel_opts_full, 10, 1, 0, 0, "$select_style onclick='moveDisks(this, this.form.devs_avail)'") . 
 		"</td></tr></table>"
 	);
 	print ui_table_end();
@@ -160,6 +173,8 @@ function validatePool(form, skipConfirm) {
 		return false;
 	}
 	var devs = form.devs;
+	var force = form.force && form.force.checked;
+	var usedSelected = false;
 	for (var i=0; i<devs.options.length; i++) { devs.options[i].selected = true; }
 	var diskSummary = "";
 	if (devs && devs.options) {
@@ -170,10 +185,20 @@ function validatePool(form, skipConfirm) {
 		for (var i = 0; i < devs.options.length; i++) {
 			var text = devs.options[i].text;
 			if (text.indexOf("color:red") !== -1 || (text.indexOf("[") !== -1 && text.indexOf("]") !== -1 && text.indexOf("[Available]") === -1)) {
-				alert("Selected disk '" + text.replace(/<[^>]*>/g, "") + "' is already in use. Please deselect it.");
-				return false;
+				if (force) {
+					usedSelected = true;
+				} else {
+					alert("Selected disk '" + text.replace(/<[^>]*>/g, "") + "' is already in use. Please deselect it.");
+					return false;
+				}
 			}
 			diskSummary += "- " + text.replace(/<[^>]*>/g, "") + "\\n";
+		}
+	}
+	if (usedSelected) {
+		var warn = "You will DESTROY already used disk(s)! Are you sure!";
+		if (!confirm(warn)) {
+			return false;
 		}
 	}
 	if (skipConfirm) return true;
@@ -237,9 +262,18 @@ EOF
 			my $label = $fs_descriptions{$key}{$opt} || $opt;
 			push(@options, [$opt, $label]);
 		}
+		my $default_val = $createopts{$key} || 'default';
+		my %opt_seen = map { $_->[0] => 1 } @options;
+		if ($default_val ne 'default' && !$opt_seen{$default_val}) {
+			my $label = $fs_descriptions{$key}{$default_val} || $default_val;
+			push(@options, [$default_val, $label]);
+		}
 		my $help = $acl_tooltips{$key} ? "<br><small><i>$acl_tooltips{$key}</i></small>" : "";
-		print ui_table_row($key.': ', ui_select($key, 'default', \@options, 1, 0, 1)." (default: ".$createopts{$key}.")".$help);
+		my $selected = defined($in{$key}) ? $in{$key} : $default_val;
+		print ui_table_row($key.': ', ui_select($key, $selected, \@options, 1, 0, 1).$help);
 	}
+	my $add_inherit_default = defined($in{'add_inherit'}) ? $in{'add_inherit'} : 1;
+	print ui_table_row('ACL inherit flags:', ui_checkbox('add_inherit', 1, 'Add :fd to base NFSv4 ACL entries', $add_inherit_default));
 	print ui_table_end();
 	print ui_submit('Create');
 	print ui_form_end();
@@ -304,12 +338,12 @@ EOF
 				my $label = $zvol_descriptions{$key}{$opt} || $opt;
 				push(@options, [$opt, $label]);
 			}
-			print ui_table_row($key.': ', ui_select($key, $default_val, \@options, 1, 0, 1)." (default: ".$default_val.")");
+			print ui_table_row($key.': ', ui_select($key, $default_val, \@options, 1, 0, 1));
 		} else {
 			my @options = split(", ", $proplist{$key});
 			unshift(@options, 'default');
 			if ($proplist{$key} eq 'boolean') { @options = ('default', 'on', 'off'); }
-			print ui_table_row($key.': ', ui_select($key, $default_val, \@options, 1, 0, 1)." (default: ".$default_val.")");
+			print ui_table_row($key.': ', ui_select($key, $default_val, \@options, 1, 0, 1));
 		}
 	}
 	print <<EOF;
@@ -334,6 +368,7 @@ function validateFsForm(form) {
 	summary += "ACL Type: " + form.acltype.value + "\\n";
 	summary += "ACL Inherit: " + form.aclinherit.value + "\\n";
 	summary += "ACL Mode: " + form.aclmode.value + "\\n";
+	summary += "ACL inherit flags: " + (form.add_inherit && form.add_inherit.checked ? "Yes" : "No") + "\\n";
 	return confirm(summary);
 }
 function validateZvolForm(form) {
@@ -395,21 +430,36 @@ EOF
 	
 } elsif ($in{'import'}) {
 	ui_print_header(undef, "Import Pool", "", undef, 1, 0);
-	print ui_table_start("Import Zpool", 'width=100%');
-	print ui_form_start("create.cgi", "post");
+	print ui_form_start("create.cgi", "get");
 	print ui_hidden('import', '1');
+	print ui_hidden('xnavigation', '1');
+	print ui_hidden('do_search', '1');
+	print ui_table_start("Import Zpool", 'width=100%');
 	print ui_table_row(undef, "Import search directory (blank for default):".ui_filebox('dir', $in{'dir'}, 25, undef, undef, undef, 1));
-	print ui_table_row(undef, ui_checkbox('destroyed', '-D', 'Search for destroyed pools', undef ));
-	print ui_table_row(undef, ui_submit('Search'));
-	print ui_form_end();
-	%imports = zpool_imports($in{'dir'}, $in{'destroyed'});
-	print ui_columns_start([ "Pool", "ID", "State" ]);
-	foreach $key (sort(keys %imports))
-	{
-		print ui_columns_row(["<a href='cmd.cgi?cmd=import&import=$imports{$key}{pool}&dir=$in{'dir'}&destroyed=$in{destroyed}&xnavigation=1'>".$imports{$key}{pool}."</a>", "<a href='cmd.cgi?cmd=import&import=$imports{$key}{'id'}&dir=$in{'dir'}&destroyed=$in{destroyed}&xnavigation=1'>".$imports{$key}{'id'}."</a>", $imports{$key}{'state'}]);
-	}
-	print ui_columns_end();
+	print ui_table_row(undef, ui_checkbox('destroyed', 1, 'Search for destroyed pools', $in{'destroyed'}));
+	print ui_table_row(undef, ui_submit('Search', 'search'));
 	print ui_table_end();
+	print ui_form_end();
+	if ($in{'do_search'} || $in{'search'}) {
+		%imports = zpool_imports($in{'dir'}, $in{'destroyed'});
+		if ($zpool_imports_error) {
+			print "<b>Error:</b> $zpool_imports_error<br />";
+		}
+		if (!%imports) {
+			if ($in{'destroyed'}) {
+				print "<b>No destroyed pools found.</b><br />";
+			} else {
+				print "<b>No exported pool to import!</b><br />";
+			}
+		} else {
+			print ui_columns_start([ "Pool", "ID", "State" ]);
+			foreach $key (sort(keys %imports))
+			{
+				print ui_columns_row(["<a href='cmd.cgi?cmd=import&import=$imports{$key}{pool}&dir=$in{'dir'}&destroyed=$in{destroyed}&xnavigation=1'>".$imports{$key}{pool}."</a>", "<a href='cmd.cgi?cmd=import&import=$imports{$key}{'id'}&dir=$in{'dir'}&destroyed=$in{destroyed}&xnavigation=1'>".$imports{$key}{'id'}."</a>", $imports{$key}{'state'}]);
+			}
+			print ui_columns_end();
+		}
+	}
 	@footer = ('index.cgi?xnavigation=1', $text{'index_return'});
 } elsif ($in{'clone'}) {
 	ui_print_header(undef, "Clone Snapshot", "", undef, 1, 0);
@@ -433,9 +483,18 @@ EOF
 			my $label = $fs_descriptions{$key}{$opt} || $opt;
 			push(@options, [$opt, $label]);
 		}
+		my $default_val = $createopts{$key} || 'default';
+		my %opt_seen = map { $_->[0] => 1 } @options;
+		if ($default_val ne 'default' && !$opt_seen{$default_val}) {
+			my $label = $fs_descriptions{$key}{$default_val} || $default_val;
+			push(@options, [$default_val, $label]);
+		}
 		my $help = $acl_tooltips{$key} ? "<br><small><i>$acl_tooltips{$key}</i></small>" : "";
-		print ui_table_row($key.': ', ui_select($key, 'default', \@options, 1, 0, 1)." (default: ".$createopts{$key}.")".$help);
+		my $selected = defined($in{$key}) ? $in{$key} : $default_val;
+		print ui_table_row($key.': ', ui_select($key, $selected, \@options, 1, 0, 1).$help);
 	}
+	my $add_inherit_default = defined($in{'add_inherit'}) ? $in{'add_inherit'} : 1;
+	print ui_table_row('ACL inherit flags:', ui_checkbox('add_inherit', 1, 'Add :fd to base NFSv4 ACL entries', $add_inherit_default));
 	print ui_table_end();
 	print ui_submit('Create');
 	print ui_form_end();
