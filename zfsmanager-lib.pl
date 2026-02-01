@@ -6,6 +6,63 @@ init_config();
 foreign_require("mount", "mount-lib.pl");
 my %access = &get_module_acl();
 
+sub h {
+	my ($s) = @_;
+	$s = '' if !defined $s;
+	return &html_escape($s);
+}
+
+sub u {
+	my ($s) = @_;
+	$s = '' if !defined $s;
+	return &urlize($s);
+}
+
+sub js_escape {
+	my ($s) = @_;
+	$s = '' if !defined $s;
+	$s =~ s/\\/\\\\/g;
+	$s =~ s/'/\\'/g;
+	$s =~ s/"/\\"/g;
+	$s =~ s/\r/\\r/g;
+	$s =~ s/\n/\\n/g;
+	$s =~ s/\x{2028}/\\u2028/g;
+	$s =~ s/\x{2029}/\\u2029/g;
+	return $s;
+}
+
+sub shell_quote {
+	my ($s) = @_;
+	return "''" if !defined $s || $s eq '';
+	$s =~ s/'/'\\''/g;
+	return "'$s'";
+}
+
+sub _parse_zfs_list_args {
+	my ($argstr) = @_;
+	my @flags = ();
+	my $target = undef;
+	return (\@flags, undef) if !defined $argstr || $argstr eq '';
+	my @parts = split(/\s+/, $argstr);
+	foreach my $p (@parts) {
+		next if $p eq '';
+		if ($p =~ /^-r$/) {
+			push(@flags, '-r');
+			next;
+		}
+		if ($p =~ /^-d(\d+)$/) {
+			push(@flags, "-d$1");
+			next;
+		}
+		if ($p =~ /^-rd(\d+)$/) {
+			push(@flags, '-r', "-d$1");
+			next;
+		}
+		$target = defined($target) ? "$target $p" : $p;
+	}
+	return (\@flags, $target);
+}
+
 sub properties_list
 #return hash of properties that can be set manually and their data type
 {
@@ -63,7 +120,7 @@ sub has_command
 {
 my ($cmd) = @_;
 return 0 if (!$cmd);
-my $rc = system("command -v $cmd >/dev/null 2>&1");
+my $rc = system("command -v ".shell_quote($cmd)." >/dev/null 2>&1");
 return $rc == 0 ? 1 : 0;
 }
 
@@ -84,8 +141,9 @@ sub acl_inherit_flags_cmd
 {
 my ($dataset) = @_;
 return undef if (!$dataset);
-my $cmd = 'acltype=$(zfs get -H -o value acltype "' . $dataset . '" 2>/dev/null); '.
-          'mp=$(zfs get -H -o value mountpoint "' . $dataset . '" 2>/dev/null); '.
+my $q_dataset = shell_quote($dataset);
+my $cmd = 'acltype=$(zfs get -H -o value acltype ' . $q_dataset . ' 2>/dev/null); '.
+          'mp=$(zfs get -H -o value mountpoint ' . $q_dataset . ' 2>/dev/null); '.
           'if [ "$acltype" = "nfsv4" ] && [ -n "$mp" ] && '.
           '[ "$mp" != "-" ] && [ "$mp" != "none" ]; then ';
 if ($^O eq 'freebsd') {
@@ -148,7 +206,12 @@ sub list_zpools
 {
 my ($pool) = @_;
 my %hash=();
-$list=`zpool list -H -o name,$config{'list_zpool'} $pool`;
+my $cols = "name,".$config{'list_zpool'};
+my $cmd = "zpool list -H -o ".shell_quote($cols);
+if (defined $pool && $pool ne "") {
+	$cmd .= " ".shell_quote($pool);
+}
+$list=`$cmd`;
 
 open my $fh, "<", \$list;
 while (my $line =<$fh>)
@@ -170,7 +233,16 @@ sub list_zfs
 #zfs list
 my ($zfs) = @_;
 my %hash=();
-$list=`zfs list -H -o name,$config{'list_zfs'} $zfs`;
+my $cols = "name,".$config{'list_zfs'};
+my ($flags, $target) = _parse_zfs_list_args($zfs);
+my $cmd = "zfs list -H -o ".shell_quote($cols);
+if (@{$flags}) {
+	$cmd .= " ".join(" ", @{$flags});
+}
+if (defined $target && $target ne "") {
+	$cmd .= " ".shell_quote($target);
+}
+$list=`$cmd`;
 
 open my $fh, "<", \$list;
 while (my $line =<$fh>)
@@ -189,7 +261,16 @@ return %hash;
 sub list_snapshots
 {
 my ($snap) = @_;
-$list=`zfs list -t snapshot -H -o name,$config{'list_snap'} -s creation $snap`;
+my $cols = "name,".$config{'list_snap'};
+my ($flags, $target) = _parse_zfs_list_args($snap);
+my $cmd = "zfs list -t snapshot -H -o ".shell_quote($cols)." -s creation";
+if (@{$flags}) {
+	$cmd .= " ".join(" ", @{$flags});
+}
+if (defined $target && $target ne "") {
+	$cmd .= " ".shell_quote($target);
+}
+$list=`$cmd`;
 $idx = 0;
 open my $fh, "<", \$list;
 while (my $line =<$fh>)
@@ -237,8 +318,11 @@ if ($alerts =~ /all pools are healthy/)
 	foreach $key (sort(keys %status))
 	{
 		%zstat = zpool_status($key);
-		$out .= "pool \'".$key."\' is ".$zstat{0}{state}." with ".$zstat{0}{errors}."<br />";
-		if ($zstat{0}{status}) { $out .= "status: ".$zstat{0}{status}."<br />"; }
+		my $key_html = h($key);
+		my $state_html = h($zstat{0}{state});
+		my $errors_html = h($zstat{0}{errors});
+		$out .= "pool \'".$key_html."\' is ".$state_html." with ".$errors_html."<br />";
+		if ($zstat{0}{status}) { $out .= "status: ".h($zstat{0}{status})."<br />"; }
 		$out .= "<br />";
 	}
 	$out .= "</b>";
@@ -251,7 +335,11 @@ sub zpool_status
 {
 my ($pool)=@_;
 my %status = ();
-my $cmd=`zpool status $pool`;
+my $cmdline = "zpool status";
+if (defined $pool && $pool ne "") {
+	$cmdline .= " ".shell_quote($pool);
+}
+my $cmd=`$cmdline`;
 my @lines = split(/\n/, $cmd);
 
 $status{0}{pool} = $pool;
@@ -388,7 +476,11 @@ sub zfs_get
 my ($zfs, $property) = @_;
 if (!defined($property) || $property eq "") { $property = "all"; }
 my %hash=();
-my $get=`zfs get -H $property $zfs`;
+my $cmd = "zfs get -H ".shell_quote($property);
+if (defined $zfs && $zfs ne "") {
+	$cmd .= " ".shell_quote($zfs);
+}
+my $get=`$cmd`;
 open my $fh, "<", \$get;
 while (my $line =<$fh>)
 {
@@ -405,7 +497,11 @@ sub zpool_get
 my ($pool, $property) = @_;
 if (!defined($property) || $property eq "") { $property = "all"; }
 my %hash=();
-my $get=`zpool get -H $property $pool`;
+my $cmd = "zpool get -H ".shell_quote($property);
+if (defined $pool && $pool ne "") {
+	$cmd .= " ".shell_quote($pool);
+}
+my $get=`$cmd`;
 
 open my $fh, "<", \$get;
 while (my $line =<$fh>)
@@ -422,14 +518,14 @@ sub zpool_imports
 my ($dir, $destroyed) = @_;
 our $zpool_imports_error;
 $zpool_imports_error = undef;
-my $dir_arg = "";
-if ($dir) {
-	$dir =~ s/"/\\"/g;
-	$dir_arg = "-d \"$dir\"";
-}
-my $destroyed_arg = defined($destroyed) ? "-D" : "";
 my %status = ();
-my $cmdline = "zpool import $dir_arg $destroyed_arg";
+my $cmdline = "zpool import";
+if ($dir) {
+	$cmdline .= " -d ".shell_quote($dir);
+}
+if (defined($destroyed)) {
+	$cmdline .= " -D";
+}
  $cmdline =~ s/\s+/ /g;
  $cmdline =~ s/\s+$//;
 my ($exit, $timed_out, @out) = run_cmd_with_timeout($cmdline, 30);
@@ -472,7 +568,9 @@ return %status;
 sub diff
 {
 my ($snap, $parent) = @_;
-my @array = split("\n", `zfs diff -FH $snap`);
+return () if (!defined $snap || $snap eq "");
+my $cmd = "zfs diff -FH ".shell_quote($snap);
+my @array = split("\n", `$cmd`);
 return @array;
 }
 
@@ -634,7 +732,9 @@ sub list_disk_ids
 			$desc = " ($size) ($model, $serial)";
 		}
 
-		my $html_label = "$display_device$desc";
+		my $display_text = "$display_device$desc";
+		my $display_html = h($display_text);
+		my $html_label = $display_html;
 
 		if (my $info = $class_info{$device}) {
 			if ($filter_boot && $info->{'role'} =~ /Boot/i) {
@@ -653,17 +753,17 @@ sub list_disk_ids
 			if ($filter_used && $is_used) { next; }
 
 			if ($is_used && $usage_txt ne '') {
-				$html_label = "<span style='color:red;'>$display_device$desc [$info->{'usage'}]</span>";
+				$html_label = "<span style='color:red;'>$display_html [" . h($info->{'usage'}) . "]</span>";
 			} elsif ($info->{'format'} eq 'Swap') {
-				$html_label = "<span style='color:red;'>$display_device$desc [SWAP]</span>";
+				$html_label = "<span style='color:red;'>$display_html [SWAP]</span>";
 			} elsif ($geom_partitions{$device}) {
-				$html_label = "<span style='color:red;'>$display_device$desc [GEOM]</span>";
+				$html_label = "<span style='color:red;'>$display_html [GEOM]</span>";
 			} else {
 				if ($info->{'usage'}) {
 					if ($info->{'usage'} =~ /Unused|No usage/i) {
 						$html_label .= " [Available]";
 					} else {
-						$html_label .= " [" . $info->{'usage'} . "]";
+						$html_label .= " [" . h($info->{'usage'}) . "]";
 					}
 				}
 			}
@@ -673,9 +773,9 @@ sub list_disk_ids
 			if ($filter_used && ($zfs_info || $geom_partitions{$device})) { next; }
 
 			if ($zfs_info) {
-				$html_label = "<span style='color:red;'>$display_device$desc [" . $zfs_info->{'pool'} . "]</span>";
+				$html_label = "<span style='color:red;'>$display_html [" . h($zfs_info->{'pool'}) . "]</span>";
 			} elsif ($geom_partitions{$device}) {
-				$html_label = "<span style='color:red;'>$display_device$desc [GEOM]</span>";
+				$html_label = "<span style='color:red;'>$display_html [GEOM]</span>";
 			}
 		}
 
@@ -688,41 +788,68 @@ sub cmd_create_zfs
 #deprecated
 {
 my ($zfs, $options)  = @_;
-my $opts = ();
+my $opts = "";
 my %createopts = create_opts();
 $createopts{'volblocksize'} = '16k';
 if (${$options}{'sparse'}) { $opts .= "-s "; }
 delete ${$options}{'sparse'};
 my $is_zvol = 0;
+my $vol_size = undef;
 if (${$options}{'zvol'}) { 
 	$is_zvol = 1;
-	$zfs = "-V ".${$options}{'zvol'}." ".$zfs; 
+	$vol_size = ${$options}{'zvol'};
 	delete ${$options}{'zvol'};
 }
 my %zvol_invalid = map { $_ => 1 } qw(aclinherit aclmode acltype atime canmount exec filesystem_limit mountpoint quota recordsize setuid snapshot_limit version xattr zoned casesensitivity normalization utf8only overlay);
 foreach $key (sort(keys %${options}))
 {
 	next if ($is_zvol && $zvol_invalid{$key});
-	$opts = (($createopts{$key}) && (${$options}{$key} =~ 'default')) ? $opts : $opts.' -o '.$key.'='.${$options}{$key};
+	next if (!defined ${$options}{$key});
+	my $val = ${$options}{$key};
+	next if (defined($createopts{$key}) && $val =~ /default/);
+	$opts .= ' -o '.shell_quote($key.'='.$val);
 }
-my $cmd="zfs create $opts $zfs";
+my $cmd="zfs create $opts";
+if ($is_zvol && defined $vol_size) {
+	$cmd .= " -V ".shell_quote($vol_size);
+}
+$cmd .= " ".shell_quote($zfs);
 return $cmd;
 }
 
 sub cmd_create_zpool
 #deprecated
 {
-my ($pool, $dev, $options, $poolopts, $force) = @_;
-my $opts = ();
+my ($pool, $vdev, $devs, $options, $poolopts, $force) = @_;
+my $opts = "";
 foreach $key (sort(keys %{$poolopts}))
 {
-	$opts = (${$poolopts}{$key} =~ 'default') ? $opts : $opts.' -o '.$key.'='.${$poolopts}{$key};
+	next if (!defined ${$poolopts}{$key});
+	my $val = ${$poolopts}{$key};
+	next if ($val =~ /default/);
+	$opts .= ' -o '.shell_quote($key.'='.$val);
 }
 foreach $key (sort(keys %{$options}))
 {
-	$opts = (${$options}{$key} =~ 'default') ? $opts : $opts.' -O '.$key.'='.${$options}{$key};
+	next if (!defined ${$options}{$key});
+	my $val = ${$options}{$key};
+	next if ($val =~ /default/);
+	$opts .= ' -O '.shell_quote($key.'='.$val);
 }
-my $cmd="zpool create $force $opts $pool $dev";
+my $cmd="zpool create";
+if ($force) { $cmd .= " $force"; }
+$cmd .= $opts;
+$cmd .= " ".shell_quote($pool);
+if ($vdev) {
+	$cmd .= " ".shell_quote($vdev);
+}
+if ($devs) {
+	if (ref($devs) eq 'ARRAY') {
+		$cmd .= " ".join(" ", map { shell_quote($_) } @{$devs});
+	} elsif ($devs ne "") {
+		$cmd .= " ".shell_quote($devs);
+	}
+}
 return $cmd;
 }
 
@@ -748,12 +875,12 @@ my %hash = zpool_get($pool, "all");
 my @rows = ();
 foreach $key (sort(keys %{$hash{$pool}}))
 {
-	my $label = $key;
+	my $label = h($key);
 	# Link to details page only if the property is documented
 	if (is_documented_property($key)) {
-		$label = '<a href="property.cgi?pool='.$pool.'&property='.$key.'&xnavigation=1">'.$key.'</a>';
+		$label = '<a href="property.cgi?pool='.u($pool).'&property='.u($key).'&xnavigation=1">'.h($key).'</a>';
 	}
-	push(@rows, [ $label, $hash{$pool}{$key}{value} ]);
+	push(@rows, [ $label, h($hash{$pool}{$key}{value}) ]);
 }
 ui_properties_columns("Pool Properties", \@rows);
 }
@@ -793,20 +920,20 @@ foreach my $key (sort(keys %zfs_info))
     # Use native Perl functions to avoid external dependencies on bc/numfmt
     my $zfs_used_bytes = from_iec($zfs_info{$key}{'used'});
     my $zfs_avail_bytes = from_iec($zfs_info{$key}{'avail'});
-    my $size_val = to_iec($zfs_used_bytes + $zfs_avail_bytes)."<br><small>($zpool_info{$key}{'size'})</small>";
-    my $alloc_val = "$zfs_info{$key}{'used'}<br><small>($zpool_info{$key}{'alloc'})</small>";
-    my $free_val  = "$zfs_info{$key}{'avail'}<br><small>($zpool_info{$key}{'free'})</small>";
+    my $size_val = h(to_iec($zfs_used_bytes + $zfs_avail_bytes))."<br><small>(" . h($zpool_info{$key}{'size'}) . ")</small>";
+    my $alloc_val = h($zfs_info{$key}{'used'})."<br><small>(" . h($zpool_info{$key}{'alloc'}) . ")</small>";
+    my $free_val  = h($zfs_info{$key}{'avail'})."<br><small>(" . h($zpool_info{$key}{'free'}) . ")</small>";
     
     my $details = $pool_details{$key};
     my $health = $details->{health} || 'UNKNOWN';
     my $raid = $details->{raid} || 'BASIC';
     
-    my $pool_col = "<a href='$action$key'>$key</a><br><small>$raid-$health</small>";
+    my $pool_col = "<a href='".$action.u($key)."'>".h($key)."</a><br><small>".h($raid)."-".h($health)."</small>";
 
     my @vals = ($pool_col, $size_val, $alloc_val, $free_val);
     # Add the other properties from zpool list
     foreach my $prop (@other_props) {
-        push(@vals, $zpool_info{$key}{$prop});
+        push(@vals, h($zpool_info{$key}{$prop}));
     }
 
     print ui_columns_row(\@vals);
@@ -829,9 +956,16 @@ foreach $key (sort(keys %zfs))
 {
 	next if ($exclude && $key eq $exclude);
 	@vals = ();
-	if ($zfs{$key}{'mountpoint'}) { $zfs{$key}{'mountpoint'} = "<a href='../filemin/index.cgi?path=".urlize($zfs{$key}{mountpoint})."&xnavigation=1'>$zfs{$key}{mountpoint}</a>"; }
-	foreach $prop (@props) { push (@vals, $zfs{$key}{$prop}); }
-    	print ui_columns_row(["<a href='$action$key'>$key</a>", @vals ]);
+	foreach $prop (@props) {
+		my $val = $zfs{$key}{$prop};
+		if ($prop eq 'mountpoint' && $val) {
+			$val = "<a href='../filemin/index.cgi?path=".u($val)."&xnavigation=1'>".h($val)."</a>";
+		} else {
+			$val = h($val);
+		}
+		push(@vals, $val);
+	}
+    	print ui_columns_row(["<a href='".$action.u($key)."'>".h($key)."</a>", @vals ]);
 }
 print ui_columns_end();
 }
@@ -855,18 +989,22 @@ if (!$hash{$zfs}{'com.sun:auto-snapshot'}) { $hash{$zfs}{'com.sun:auto-snapshot'
 my @rows = ();
 foreach $key (sort(keys %{$hash{$zfs}}))
 {
-	my $label = $key;
-	my $value = $hash{$zfs}{$key}{value};
+	my $label = h($key);
+	my $raw_value = $hash{$zfs}{$key}{value};
+	my $value = h($raw_value);
 	if (is_documented_property($key))
 	{
-		$label = '<a href="property.cgi?zfs='.$zfs.'&property='.$key.'&xnavigation=1">'.$key.'</a>';
+		$label = '<a href="property.cgi?zfs='.u($zfs).'&property='.u($key).'&xnavigation=1">'.h($key).'</a>';
 		if ($key =~ 'origin') {
-			$value = "<a href='status.cgi?snap=$value&xnavigation=1'>$value</a>";
+			$value = "<a href='status.cgi?snap=".u($raw_value)."&xnavigation=1'>".h($raw_value)."</a>";
 		} elsif ($key =~ 'clones') {
 			$row = "";
-			@clones = split(',', $value);
-			foreach $clone (@clones) { $row .= "<a href='status.cgi?zfs=$clone&xnavigation=1'>$clone</a> "; }
-			$value = $row;
+			@clones = split(',', $raw_value);
+			foreach $clone (@clones) {
+				next if ($clone eq '');
+				$row .= "<a href='status.cgi?zfs=".u($clone)."&xnavigation=1'>".h($clone)."</a> ";
+			}
+			$value = $row || h($raw_value);
 		}
 	}
 	push(@rows, [ $label, $value ]);
@@ -926,12 +1064,14 @@ my $num = 0;
 foreach $key (sort(keys %snapshot))
 {
 	@vals = ();
-	foreach $prop (@props) { push (@vals, $snapshot{$key}{$prop}); }
+	foreach $prop (@props) { push (@vals, h($snapshot{$key}{$prop})); }
+	my $snap_name = $snapshot{$key}{name};
+	my $snap_link = "<a href='status.cgi?snap=".u($snap_name)."&xnavigation=1'>".h($snap_name)."</a>";
 	if ($admin =~ /1/) {
-		print ui_columns_row([ui_checkbox("select", $snapshot{$key}{name}.";", "<a href='status.cgi?snap=$snapshot{$key}{'name'}&xnavigation=1'>$snapshot{$key}{'name'}</a>"), @vals ]);
+		print ui_columns_row([ui_checkbox("select", $snap_name.";", $snap_link), @vals ]);
 		$num ++;
 	} else {
-		print ui_columns_row([ "<a href='status.cgi?snap=$snapshot{$key}{name}&xnavigation=1'>$snapshot{$key}{name}</a>", @vals ]);
+		print ui_columns_row([ $snap_link, @vals ]);
 	}
 }
 print ui_columns_end();
@@ -945,9 +1085,9 @@ sub ui_create_snapshot
 {
 my ($zfs) = @_;
 $rv = ui_form_start('cmd.cgi', 'post')."\n";
-$rv .= "Create new snapshot based on filesystem: ".$zfs."<br />\n";
+$rv .= "Create new snapshot based on filesystem: ".h($zfs)."<br />\n";
 my $date = strftime "zfs_manager_%Y-%m-%d-%H%M", localtime;
-$rv .= $zfs."@ ".ui_textbox('snap', $date, 28)."\n";
+$rv .= h($zfs)."@ ".ui_textbox('snap', $date, 28)."\n";
 $rv .= ui_hidden('zfs', $zfs)."\n";
 $rv .= ui_hidden('cmd', "snapshot")."\n";
 $rv .= ui_submit("Create");
@@ -958,8 +1098,10 @@ return $rv;
 sub ui_cmd
 {
 my ($message, $cmd, $timeout) = @_;
-print "$text{'cmd_'.$in{'cmd'}} $message $text{'cmd_with'}<br />\n";
-print "<i># ".$cmd."</i><br /><br />\n";
+my $msg_html = h($message);
+my $cmd_html = h($cmd);
+print "$text{'cmd_'.$in{'cmd'}} $msg_html $text{'cmd_with'}<br />\n";
+print "<i># ".$cmd_html."</i><br /><br />\n";
 if (!$in{'confirm'}) {
 	print ui_form_start('cmd.cgi', 'post');
 	foreach $key (keys %in) {
@@ -980,12 +1122,13 @@ if (!$in{'confirm'}) {
 	}
 	if ($timed_out) {
 		print "<b>error: </b>Command timed out after ${timeout}s.<br />\n";
-		foreach $key (@result) { print $key."<br />\n"; }
+		foreach $key (@result) { print h($key)."<br />\n"; }
 	} elsif ($timeout ? ($exit == 0) : !$result[0]) {
 		print "Success! <br />\n";
 	} else	{
-		print "<b>error: </b>".($result[0] || "Command failed.")."<br />\n";
-		foreach $key (@result[1..@result]) { print $key."<br />\n"; }
+		my $err = $result[0] || "Command failed.";
+		print "<b>error: </b>".h($err)."<br />\n";
+		foreach $key (@result[1..@result]) { print h($key)."<br />\n"; }
 	}
 }
 print "<br />";
@@ -1071,7 +1214,10 @@ sub ui_popup_link
 #deprecated
 {
 my ($name, $url)=@_;
-return "<a onClick=\"\window.open('$url', 'cmd', 'toolbar=no,menubar=no,scrollbars=yes,width=600,height=400,resizable=yes'); return false\"\ href='$url'>$name</a>";
+my $url_js = js_escape($url);
+my $url_html = h($url);
+my $name_html = h($name);
+return "<a onClick=\"window.open('$url_js', 'cmd', 'toolbar=no,menubar=no,scrollbars=yes,width=600,height=400,resizable=yes'); return false\" href='$url_html'>$name_html</a>";
 }
 
 sub test_function
@@ -1128,7 +1274,8 @@ my $smartctl = `which smartctl 2>/dev/null`;
 chomp $smartctl;
 return "" unless $smartctl;
 
-my $out = `$smartctl -H $dev_path 2>/dev/null`;
+my $cmd = shell_quote($smartctl)." -H ".shell_quote($dev_path)." 2>/dev/null";
+my $out = `$cmd`;
 if ($out =~ /PASSED/) {
     return "<font color='green'>PASSED</font>";
 } elsif ($out =~ /FAILED/) {
@@ -1163,37 +1310,44 @@ my $temp = "-";
 my $size = "-";
 
 if ($^O eq 'linux') {
-    my $out = `lsblk -dno MODEL,SERIAL $parent_disk 2>/dev/null`;
+    my $cmd = "lsblk -dno MODEL,SERIAL ".shell_quote($parent_disk)." 2>/dev/null";
+    my $out = `$cmd`;
     chomp $out;
     ($model, $serial) = split(/\s+/, $out, 2);
     if (!$model) {
-         my $info = `smartctl -i $parent_disk 2>/dev/null`;
+         my $info_cmd = "smartctl -i ".shell_quote($parent_disk)." 2>/dev/null";
+         my $info = `$info_cmd`;
          if ($info =~ /Device Model:\s+(.*)/) { $model = $1; }
          elsif ($info =~ /Model Number:\s+(.*)/) { $model = $1; }
          if ($info =~ /Serial Number:\s+(.*)/) { $serial = $1; }
     }
-    my $size_out = `lsblk -dno SIZE $dev_path 2>/dev/null`;
+    my $size_cmd = "lsblk -dno SIZE ".shell_quote($dev_path)." 2>/dev/null";
+    my $size_out = `$size_cmd`;
     chomp $size_out;
     if ($size_out) { $size = $size_out; }
 } elsif ($^O eq 'freebsd') {
-    my $smart = `smartctl -i $parent_disk 2>/dev/null`;
+    my $smart_cmd = "smartctl -i ".shell_quote($parent_disk)." 2>/dev/null";
+    my $smart = `$smart_cmd`;
     if ($smart =~ /Device Model:\s+(.*)/) { $model = $1; }
     elsif ($smart =~ /Model Number:\s+(.*)/) { $model = $1; }
     if ($smart =~ /Serial Number:\s+(.*)/) { $serial = $1; }
     if ($model eq "-" && $serial eq "-") {
         # Fallback to diskinfo if smartctl fails
-        my $diskinfo = `diskinfo -v $parent_disk 2>/dev/null`;
+        my $diskinfo_cmd = "diskinfo -v ".shell_quote($parent_disk)." 2>/dev/null";
+        my $diskinfo = `$diskinfo_cmd`;
         if ($diskinfo =~ /^\s+(.*?)\s+# Disk descr\./m) { $model = $1; }
         if ($diskinfo =~ /^\s+(.*?)\s+# Disk ident\./m) { $serial = $1; }
     }
-    my $diskinfo = `diskinfo -v $dev_path 2>/dev/null`;
+    my $diskinfo_cmd2 = "diskinfo -v ".shell_quote($dev_path)." 2>/dev/null";
+    my $diskinfo = `$diskinfo_cmd2`;
     if ($diskinfo =~ /^\s+(\d+)\s+# mediasize in bytes/m) {
         $size = to_iec($1);
     }
 }
 
 # Get Temperature
-my $smart_a = `smartctl -A $parent_disk 2>/dev/null`;
+my $smart_a_cmd = "smartctl -A ".shell_quote($parent_disk)." 2>/dev/null";
+my $smart_a = `$smart_a_cmd`;
 if ($smart_a =~ /^(190|194)\s+\w+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(\d+)/m) {
     $temp = $2 . "C";
 } elsif ($smart_a =~ /^Temperature:\s+(\d+)\s+Celsius/m) {
@@ -1237,7 +1391,7 @@ sub get_type_description {
 sub get_disk_structure {
     my ($device) = @_;
     my $result = { 'entries' => [], 'partitions' => {} };
-    my $cmd = "gpart show -l $device 2>&1";
+    my $cmd = "gpart show -l ".shell_quote($device)." 2>&1";
     my $out = backquote_command($cmd);
     if ($out =~ /=>\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+\(([^)]+)\)/) {
         my $start_block = $1;
@@ -1268,7 +1422,7 @@ sub get_disk_structure {
             };
         }
     }
-    my $list_out = backquote_command("gpart list $device 2>&1");
+    my $list_out = backquote_command("gpart list ".shell_quote($device)." 2>&1");
     my (%parts, $current_idx);
     foreach my $line (split(/\n/, $list_out)) {
         if ($line =~ /^\s*(?:\d+\.\s*)?Name:\s*(\S+)/i) {
@@ -1320,11 +1474,11 @@ sub get_disk_structure {
 sub get_disk_sectorsize {
     my ($device) = @_;
     my $dev = $device; $dev =~ s{^/dev/}{};
-    my $outv = backquote_command("diskinfo -v $dev 2>/dev/null");
+    my $outv = backquote_command("diskinfo -v ".shell_quote($dev)." 2>/dev/null");
     if ($outv =~ /sectorsize:\s*(\d+)/i) {
         return int($1);
     }
-    my $out = backquote_command("diskinfo $dev 2>/dev/null");
+    my $out = backquote_command("diskinfo ".shell_quote($dev)." 2>/dev/null");
     if ($out =~ /^\S+\s+(\d+)\s+\d+/) {
         return int($1);
     }

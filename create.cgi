@@ -97,8 +97,10 @@ if ($in{'create'} =~ "zpool")
 	my $boot_val   = $in{'filter_boot'} ? 0 : 1;
 	my $used_label = $in{'filter_used'} ? "Show Used Disks" : "Hide Used Disks";
 	my $used_val   = $in{'filter_used'} ? 0 : 1;
-	my $js_boot = "onclick='location.href=\"create.cgi?create=zpool&filter_boot=$boot_val&filter_used=$in{'filter_used'}&xnavigation=1\"; return false;'";
-	my $js_used = "onclick='location.href=\"create.cgi?create=zpool&filter_boot=$in{'filter_boot'}&filter_used=$used_val&xnavigation=1\"; return false;'";
+	my $filter_used_js = js_escape($in{'filter_used'});
+	my $filter_boot_js = js_escape($in{'filter_boot'});
+	my $js_boot = "onclick='location.href=\"create.cgi?create=zpool&filter_boot=$boot_val&filter_used=$filter_used_js&xnavigation=1\"; return false;'";
+	my $js_used = "onclick='location.href=\"create.cgi?create=zpool&filter_boot=$filter_boot_js&filter_used=$used_val&xnavigation=1\"; return false;'";
 	my $filters = "&nbsp;&nbsp;" . ui_button($boot_label, "btn_boot", 0, $js_boot) . "&nbsp;&nbsp;" . ui_button($used_label, "btn_used", 0, $js_used);
 
 	print ui_table_row("VDEV Type", ui_select('vdev', $in{'vdev'}, ['stripe', 'mirror', 'raidz1', 'raidz2', 'raidz3'], 1, 0, 1) . $filters);
@@ -145,7 +147,7 @@ if ($in{'create'} =~ "zpool")
 	# Get existing pools for validation
 	my %pools = list_zpools();
 	my @pool_names = keys %pools;
-	my $pool_list_js = join(",", map { "'$_'" } @pool_names);
+	my $pool_list_js = join(",", map { "'".js_escape($_)."'" } @pool_names);
 
 	print <<EOF;
 <script type="text/javascript">
@@ -245,7 +247,7 @@ EOF
 	
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateFsForm(this)'");
 	print ui_table_start('New File System', 'width=100%', '2');
-	print ui_table_row("Name:", $in{'parent'}."/".ui_textbox('zfs'));
+	print ui_table_row("Name:", h($in{'parent'})."/".ui_textbox('zfs'));
 	print ui_table_row("Mount point:", ui_filebox('mountpoint', '', 25, undef, undef, 1)." (blank for default)");
 	print ui_hidden('parent', $in{'parent'});
 	print ui_hidden('create', 'zfs');
@@ -282,7 +284,7 @@ EOF
 	print &ui_tabs_start_tab("mode", "zvol");
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateZvolForm(this)'");
 	print ui_table_start('New Volume', 'width=100%', '2');
-	print ui_table_row("Name:", $in{'parent'}."/".ui_textbox('zfs'));
+	print ui_table_row("Name:", h($in{'parent'})."/".ui_textbox('zfs'));
 	print ui_table_row("Size:", ui_textbox('size', undef, 20, undef, undef, "oninput='updateRefres()'"));
 	print ui_hidden('parent', $in{'parent'});
 	print ui_hidden('create', 'zfs');
@@ -443,7 +445,7 @@ EOF
 	if ($in{'do_search'} || $in{'search'}) {
 		%imports = zpool_imports($in{'dir'}, $in{'destroyed'});
 		if ($zpool_imports_error) {
-			print "<b>Error:</b> $zpool_imports_error<br />";
+			print "<b>Error:</b> ".h($zpool_imports_error)."<br />";
 		}
 		if (!%imports) {
 			if ($in{'destroyed'}) {
@@ -455,7 +457,14 @@ EOF
 			print ui_columns_start([ "Pool", "ID", "State" ]);
 			foreach $key (sort(keys %imports))
 			{
-				print ui_columns_row(["<a href='cmd.cgi?cmd=import&import=$imports{$key}{pool}&dir=$in{'dir'}&destroyed=$in{destroyed}&xnavigation=1'>".$imports{$key}{pool}."</a>", "<a href='cmd.cgi?cmd=import&import=$imports{$key}{'id'}&dir=$in{'dir'}&destroyed=$in{destroyed}&xnavigation=1'>".$imports{$key}{'id'}."</a>", $imports{$key}{'state'}]);
+				my $pool = $imports{$key}{pool};
+				my $id = $imports{$key}{'id'};
+				my $state = $imports{$key}{'state'};
+				my $dir_param = u($in{'dir'});
+				my $destroyed_param = u($in{destroyed});
+				my $pool_link = "<a href='cmd.cgi?cmd=import&import=".u($pool)."&dir=$dir_param&destroyed=$destroyed_param&xnavigation=1'>".h($pool)."</a>";
+				my $id_link = "<a href='cmd.cgi?cmd=import&import=".u($id)."&dir=$dir_param&destroyed=$destroyed_param&xnavigation=1'>".h($id)."</a>";
+				print ui_columns_row([$pool_link, $id_link, h($state)]);
 			}
 			print ui_columns_end();
 		}
@@ -466,7 +475,7 @@ EOF
 	my %parent = find_parent($in{'clone'});
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateClone(this)'");
 	print ui_table_start('Clone Snapshot', 'width=100%', '6');
-	print ui_table_row(undef, '<b>Snapshot:</b> '.$in{'clone'});
+	print ui_table_row(undef, '<b>Snapshot:</b> '.h($in{'clone'}));
 	print ui_table_row(undef, "<b>Name: </b>".$parent{'pool'}."/".ui_textbox('zfs'));
 	print ui_table_row(undef, '<b>Mount point</b> (blank for default)'.ui_filebox('mountpoint', '', 25, undef, undef, 1));
 	print ui_hidden('cmd', 'clone');
@@ -517,7 +526,7 @@ EOF
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateDestroy(this)'");
 	print ui_table_start('Destroy Filesystem', 'width=100%', '6');
 	print "<tr><td colspan='2'>";
-	print "<b>Filesystem:</b> ".$in{'destroy_zfs'}."<br /><br />";
+	print "<b>Filesystem:</b> ".h($in{'destroy_zfs'})."<br /><br />";
 	print "<b>Options</b><br />";
 	print ui_checkbox("force", "-r", "Destroy all child dependencies (recursive).")."<br />";
 	if ($^O eq 'freebsd') {
@@ -546,14 +555,14 @@ function validateDestroy(form) {
 }
 </script>
 EOF
-	@footer = ("status.cgi?zfs=".$in{'destroy_zfs'}."&xnavigation=1", $in{'destroy_zfs'});
+	@footer = ("status.cgi?zfs=".u($in{'destroy_zfs'})."&xnavigation=1", h($in{'destroy_zfs'}));
 } elsif ($in{'destroy_pool'}) {
 	ui_print_header(undef, "Destroy Pool", "", undef, 1, 0);
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateDestroy(this)'");
 	print ui_table_start('Destroy Pool', 'width=100%', '6');
 	print "<tr>";
 	print "<td valign='top' width='45%'>";
-	print "<b>Pool:</b> ".$in{'destroy_pool'}."<br /><br />";
+	print "<b>Pool:</b> ".h($in{'destroy_pool'})."<br /><br />";
 	print "<b>Options</b><br />";
 	print ui_checkbox("force", "-f", "Force unmount any active datasets.")."<br />";
 	print "<br />";
@@ -584,7 +593,7 @@ function validateDestroy(form) {
 }
 </script>
 EOF
-	@footer = ("status.cgi?pool=".$in{'destroy_pool'}."&xnavigation=1", $in{'destroy_pool'});
+	@footer = ("status.cgi?pool=".u($in{'destroy_pool'})."&xnavigation=1", h($in{'destroy_pool'}));
 } elsif ($in{'rename'}) {
 	ui_print_header(undef, "Rename", "", undef, 1, 0);
     print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateRename(this)'");
@@ -594,16 +603,16 @@ EOF
 		print ui_hidden('confirm', 'yes');
 		$parent = $parent{'filesystem'};
 		print ui_table_start('Rename snapshot', 'width=100%', '6');
-       	print ui_table_row(undef, '<b>Snapshot:</b> '.$in{'rename'});
+       	print ui_table_row(undef, '<b>Snapshot:</b> '.h($in{'rename'}));
       	print ui_table_row(undef, "<b>New Name: </b>".$parent."@".ui_textbox('name', $parent{'snapshot'}, 35));
 		print ui_table_row(undef, ui_checkbox("recurse", "-r ", "Recursively rename the snapshots of all descendent datasets."));
-		@footer = ("status.cgi?snap=".$in{'rename'}."&xnavigation=1", $in{'rename'});
+		@footer = ("status.cgi?snap=".u($in{'rename'})."&xnavigation=1", h($in{'rename'}));
 	} elsif (index($in{'rename'}, '/') != -1) {
         #is filesystem
 		$parent = $parent{'pool'};
 		ui_zfs_list("-r ".$in{'rename'});
 		print ui_table_start('Rename filesystem', 'width=100%', '6');
-                print ui_table_row(undef, '<b>Filesystem:</b> '.$in{'rename'});
+                print ui_table_row(undef, '<b>Filesystem:</b> '.h($in{'rename'}));
                 print ui_table_row(undef, "<b>New Name: </b>".$parent."/".ui_textbox('name', undef, 35));
 		print ui_table_row(undef, ui_checkbox("prnt", "-p ", "Create all the nonexistent parent datasets."));
 	}
@@ -635,7 +644,8 @@ EOF
 	print ui_columns_start([ "File System", "Used", "Avail", "Refer", "Mountpoint" ]);
 	foreach $key (sort(keys %zfs)) 
 	{
-		print ui_columns_row(["<a href='create.cgi?create=snapshot&zfs=$key&xnavigation=1'>$key</a>", $zfs{$key}{used}, $zfs{$key}{avail}, $zfs{$key}{refer}, $zfs{$key}{mount} ]);
+		my $link = "<a href='create.cgi?create=snapshot&zfs=".u($key)."&xnavigation=1'>".h($key)."</a>";
+		print ui_columns_row([$link, h($zfs{$key}{used}), h($zfs{$key}{avail}), h($zfs{$key}{refer}), h($zfs{$key}{mount}) ]);
 	}
 	print ui_columns_end();
 	@footer = ('index.cgi?mode=snapshot&xnavigation=1', $text{'snapshot_return'});
@@ -646,7 +656,8 @@ EOF
 	print ui_columns_start([ "File System", "Used", "Avail", "Refer", "Mountpoint" ]);
 	foreach $key (sort(keys %zfs)) 
 	{
-		print ui_columns_row(["<a href='status.cgi?zfs=$key&xnavigation=1'>$key</a>", $zfs{$key}{used}, $zfs{$key}{avail}, $zfs{$key}{refer}, $zfs{$key}{mount} ]);
+		my $link = "<a href='status.cgi?zfs=".u($key)."&xnavigation=1'>".h($key)."</a>";
+		print ui_columns_row([$link, h($zfs{$key}{used}), h($zfs{$key}{avail}), h($zfs{$key}{refer}), h($zfs{$key}{mount}) ]);
 	}
 	print ui_columns_end();
 	#show list of snapshots based on filesystem
@@ -655,7 +666,10 @@ EOF
 	print ui_columns_start([ "Snapshot", "Used", "Refer" ]);
 	foreach $key (sort(keys %snapshot)) 
 	{
-		if ($key =~ ($in{'zfs'}."@") ) { print ui_columns_row(["<a href='snapshot.cgi?snap=$key&xnavigation=1'>$key</a>", $snapshot{$key}{used}, $snapshot{$key}{refer} ]); }
+		if (index($key, $in{'zfs'}."@") == 0 ) {
+			my $link = "<a href='snapshot.cgi?snap=".u($key)."&xnavigation=1'>".h($key)."</a>";
+			print ui_columns_row([$link, h($snapshot{$key}{used}), h($snapshot{$key}{refer}) ]);
+		}
 	}
 	print ui_columns_end();
 	print ui_create_snapshot($in{'zfs'});
@@ -664,11 +678,11 @@ EOF
 if (@footer) { ui_print_footer(@footer); 
 } elsif ($in{'zfs'} && !@footer) {
 		print "<br />";
-		ui_print_footer("status.cgi?zfs=".$in{'zfs'}."&xnavigation=1", $in{'zfs'});
+		ui_print_footer("status.cgi?zfs=".u($in{'zfs'})."&xnavigation=1", h($in{'zfs'}));
 } elsif ($in{'pool'} && !@footer) {
 		print "<br />";
-		ui_print_footer("status.cgi?pool=".$in{'pool'}."&xnavigation=1", $in{'pool'});
+		ui_print_footer("status.cgi?pool=".u($in{'pool'})."&xnavigation=1", h($in{'pool'}));
 } elsif ($in{'snap'} && !@footer) {
 		print "<br />";
-		ui_print_footer("status.cgi?snap=".$in{'snap'}."&xnavigation=1", $in{'snap'});
+		ui_print_footer("status.cgi?snap=".u($in{'snap'})."&xnavigation=1", h($in{'snap'}));
 }

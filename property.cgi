@@ -9,19 +9,19 @@ ui_print_header(undef, $text{'property_title'}, "", undef, 1, 1);
 %pool_proplist = pool_properties_list();
 %proplist = properties_list();
 
-print ui_table_start("$text{'property_title'}: $in{'property'}", "width=100%", "10", ['align=left'] );
+print ui_table_start(h($text{'property_title'}).": ".h($in{'property'}), "width=100%", "10", ['align=left'] );
 if ($in{'zfs'}) { 
 	%get = zfs_get($in{'zfs'}, $in{'property'}); 
-	print "File system:  <b>".$in{'zfs'}."</b><br /> ";
-	print "Property: <b>", $in{'property'}, "</b> is currently: <b>", $get{$in{'zfs'}}{$in{'property'}}{value}, "</b><br />";
-	print "Source: <b>", $get{$in{'zfs'}}{$in{'property'}}{source}."</b>";
+	print "File system:  <b>".h($in{'zfs'})."</b><br /> ";
+	print "Property: <b>", h($in{'property'}), "</b> is currently: <b>", h($get{$in{'zfs'}}{$in{'property'}}{value}), "</b><br />";
+	print "Source: <b>", h($get{$in{'zfs'}}{$in{'property'}}{source})."</b>";
 	print "<br />";
 	print "<br />";
 } elsif ($in{'pool'}) { 
 	%get = zpool_get($in{'pool'},  $in{'property'}); 
-	print "Pool:  <b>".$in{'pool'}."</b><br /> ";
-	print "Property: <b>", $in{'property'}, "</b> is currently: <b>", $get{$in{'pool'}}{$in{'property'}}{value}, "</b><br />";
-	print "Source: <b>", $get{$in{'pool'}}{$in{'property'}}{source}."</b><br />";
+	print "Pool:  <b>".h($in{'pool'})."</b><br /> ";
+	print "Property: <b>", h($in{'property'}), "</b> is currently: <b>", h($get{$in{'pool'}}{$in{'property'}}{value}), "</b><br />";
+	print "Source: <b>", h($get{$in{'pool'}}{$in{'property'}}{source})."</b><br />";
 	print "<br />";	
 }
 
@@ -33,7 +33,7 @@ if ($text{'prop_'.$in{'property'}}) {
 }
 if ($desc) {
 	print "<b>Description:</b><br />";
-	print $desc;
+	print h($desc);
 	print "<br />";
 	print "<br />";
 }
@@ -47,7 +47,7 @@ print ui_hidden('zfs', $in{'zfs'});
 print ui_hidden('pool', $in{'pool'});
 if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} =~ 'unavailable') {
         print ui_hidden('cmd', 'load-key');
-        print "<a href='cmd.cgi?zfs=$in{'zfs'}&cmd=zfsact&action=load-key'>Load key</a>";
+        print "<a href='cmd.cgi?zfs=".u($in{'zfs'})."&cmd=zfsact&action=load-key'>Load key</a>";
         #print ui_submit('submit'), "<br />";
 } elsif ($in{'property'} =~ 'mountpoint') {
 	print ui_hidden('cmd', 'setzfs');
@@ -57,10 +57,10 @@ if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} 
 	if ($get{$in{'zfs'}}{$in{'property'}}{value} =~ 'yes') {
 		#fix this to a post command
 		print ui_hidden('cmd', "unmount");
-		print "<a href='cmd.cgi?zfs=$in{'zfs'}&cmd=zfsact&action=unmount'>Unmount this file system</a>";
+		print "<a href='cmd.cgi?zfs=".u($in{'zfs'})."&cmd=zfsact&action=unmount'>Unmount this file system</a>";
 	} else {
 		print ui_hidden('cmd', "mount");
-		print "<a href='cmd.cgi?zfs=$in{'zfs'}&cmd=zfsact&action=mount'>Mount this file system</a>";
+		print "<a href='cmd.cgi?zfs=".u($in{'zfs'})."&cmd=zfsact&action=mount'>Mount this file system</a>";
 	}
 } elsif ($in{'property'} =~ 'comment') {
 	print ui_hidden('cmd', 'setpool') ;
@@ -76,7 +76,7 @@ if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} 
 } elsif ($proplist{$in{'property'}} =~ 'text') {
 
 	print "", ($in{'zfs'}) ? ui_hidden('cmd', 'setzfs') : "";
-	print "Set ".$in{'property'}.": ".ui_textbox('set', $get{$in{'zfs'}}{$in{'property'}}{value});
+	print "Set ".h($in{'property'}).": ".ui_textbox('set', $get{$in{'zfs'}}{$in{'property'}}{value});
 	print ui_submit('submit'), "<br />";
 
 } elsif ($proplist{$in{'property'}} =~ 'special' || $pool_proplist{$in{'property'}} =~ 'special') {
@@ -114,6 +114,6 @@ print "<br />";
 print ui_form_end();
 }
 
-if ($in{'zfs'} && (index($in{'zfs'}, '@') != -1)) { ui_print_footer("status.cgi?snap=$in{'zfs'}", $in{'zfs'}); }
-if ($in{'zfs'} && (index($in{'zfs'}, '@') == -1)) { ui_print_footer("status.cgi?zfs=$in{'zfs'}", $in{'zfs'}); }
-if ($in{'pool'}) { ui_print_footer("status.cgi?pool=$in{'pool'}", $in{'pool'}); }
+if ($in{'zfs'} && (index($in{'zfs'}, '@') != -1)) { ui_print_footer("status.cgi?snap=".u($in{'zfs'}), h($in{'zfs'})); }
+if ($in{'zfs'} && (index($in{'zfs'}, '@') == -1)) { ui_print_footer("status.cgi?zfs=".u($in{'zfs'}), h($in{'zfs'})); }
+if ($in{'pool'}) { ui_print_footer("status.cgi?pool=".u($in{'pool'}), h($in{'pool'})); }
