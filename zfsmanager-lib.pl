@@ -38,6 +38,164 @@ sub shell_quote {
 	return "'$s'";
 }
 
+sub _sha256_hex
+{
+	my ($data) = @_;
+	$data = '' if !defined $data;
+	my $hex = undef;
+	eval {
+		require Digest::SHA;
+		$hex = Digest::SHA::sha256_hex($data);
+	};
+	if (!$hex) {
+		my $sum = 0;
+		foreach my $c (split(//, $data)) {
+			$sum = (($sum * 33) + ord($c)) & 0xFFFFFFFF;
+		}
+		$hex = sprintf("%08x", $sum);
+	}
+	return $hex;
+}
+
+sub get_csrf_secret
+{
+	if (!$config{'csrf_secret'}) {
+		my $seed = join("|",
+			time(), $$, rand(), ($ENV{'REMOTE_ADDR'} || ''), ($ENV{'HTTP_USER_AGENT'} || '')
+		);
+		$config{'csrf_secret'} = _sha256_hex($seed);
+		save_module_config();
+	}
+	return $config{'csrf_secret'};
+}
+
+sub csrf_token
+{
+	my $sid = '';
+	$sid = $main::session_id if (defined $main::session_id && $main::session_id ne '');
+	$sid = $ENV{'SESSION_ID'} if (!$sid && defined $ENV{'SESSION_ID'});
+	$sid = $ENV{'HTTP_COOKIE'} if (!$sid && defined $ENV{'HTTP_COOKIE'});
+	my $user = $remote_user || $ENV{'REMOTE_USER'} || '';
+	my $secret = get_csrf_secret();
+	return _sha256_hex(join("|", $secret, $sid, $user));
+}
+
+sub verify_csrf_token
+{
+	my ($token) = @_;
+	return 0 if (!defined $token || $token eq '');
+	my $expected = csrf_token();
+	foreach my $t (split(/\0/, $token)) {
+		next if (!defined($t) || $t eq '');
+		return 1 if ($t eq $expected);
+	}
+	return 0;
+}
+
+sub ui_csrf_hidden
+{
+	return ui_hidden('csrf_token', csrf_token());
+}
+
+sub is_post_request
+{
+	return (($ENV{'REQUEST_METHOD'} || '') =~ /^POST$/i) ? 1 : 0;
+}
+
+sub require_post_csrf
+{
+	my ($label) = @_;
+	$label ||= 'Invalid request';
+	if (!is_post_request()) {
+		error($label.": POST request required");
+	}
+	if (!verify_csrf_token($in{'csrf_token'})) {
+		error($label.": invalid CSRF token");
+	}
+}
+
+our $ui_post_action_link_counter = 0;
+sub ui_post_action_link
+{
+	my ($label, $script, $params, $confirm_text) = @_;
+	$params ||= {};
+	$script ||= 'cmd.cgi';
+	$ui_post_action_link_counter++;
+	my $id = "zfsmgr_post_".$ui_post_action_link_counter;
+	my $confirm_js = '';
+	if (defined $confirm_text && $confirm_text ne '') {
+		my $msg = js_escape($confirm_text);
+		$confirm_js = "if (!confirm(\\\"$msg\\\")) return false; ";
+	}
+	my $rv = "<form id='".h($id)."' action='".h($script)."' method='post' style='display:inline; margin:0; padding:0;'>";
+	foreach my $k (sort keys %{$params}) {
+		$rv .= ui_hidden($k, $params->{$k});
+	}
+	$rv .= ui_csrf_hidden();
+	$rv .= "</form>";
+	$rv .= "<a href='#' onClick=\"".$confirm_js."document.getElementById('".h($id)."').submit(); return false;\">".h($label)."</a>";
+	return $rv;
+}
+
+sub is_valid_pool_name
+{
+	my ($name) = @_;
+	return 0 if (!defined $name || $name eq '');
+	return $name =~ /^[a-zA-Z0-9._-]+$/ ? 1 : 0;
+}
+
+sub is_valid_zfs_name
+{
+	my ($name) = @_;
+	return 0 if (!defined $name || $name eq '');
+	return $name =~ /^[a-zA-Z0-9._\-\/\@]+$/ ? 1 : 0;
+}
+
+sub is_valid_property_name
+{
+	my ($name) = @_;
+	return 0 if (!defined $name || $name eq '');
+	return $name =~ /^[a-zA-Z0-9._\-:\@]+$/ ? 1 : 0;
+}
+
+sub is_valid_action_name
+{
+	my ($name) = @_;
+	return 0 if (!defined $name || $name eq '');
+	return $name =~ /^[a-z][a-z0-9-]*$/ ? 1 : 0;
+}
+
+sub is_valid_vdev_name
+{
+	my ($name) = @_;
+	return 0 if (!defined $name || $name eq '');
+	return $name =~ /^[a-zA-Z0-9._\-\/:\@]+$/ ? 1 : 0;
+}
+
+sub is_valid_dev_index
+{
+	my ($idx) = @_;
+	return 0 if (!defined $idx || $idx eq '');
+	return $idx =~ /^\d+$/ ? 1 : 0;
+}
+
+sub has_acl_permission
+{
+	my ($flag) = @_;
+	return 1 if (!defined $flag || $flag eq '');
+	my %acl = get_module_acl();
+	return 1 if (!defined $acl{$flag});
+	return $acl{$flag} =~ /^(?:1|yes|on|true)$/i ? 1 : 0;
+}
+
+sub require_acl_permission
+{
+	my ($flag, $label) = @_;
+	return if has_acl_permission($flag);
+	$label ||= 'Permission denied';
+	error($label);
+}
+
 sub _parse_zfs_list_args {
 	my ($argstr) = @_;
 	my @flags = ();
@@ -87,13 +245,15 @@ sub is_documented_property
 my ($property) = @_;
 our %doc_props;
 if (!%doc_props) {
-	require './property-list-en.pl';
-	my %props = property_desc();
-	%doc_props = map { $_ => 1 } keys %props;
 	foreach my $key (keys %text) {
 		if ($key =~ /^prop_(.+)$/) {
 			$doc_props{$1} = 1;
 		}
+	}
+	my %zfs_props = properties_list();
+	my %pool_props = pool_properties_list();
+	foreach my $k (keys %zfs_props, keys %pool_props) {
+		$doc_props{$k} = 1;
 	}
 }
 return $doc_props{$property} ? 1 : 0;
@@ -193,11 +353,13 @@ my ($zfs, $property) = @_;
 %pool_props = pool_properties_list();
 return 0 if (!is_documented_property($property));
 if ($zfs) {
+	return 0 if (!has_acl_permission('uzfs_properties'));
 	my %type = zfs_get($zfs, 'type');
 	if ($type{$zfs}{type}{value} =~ 'snapshot') { return 0; }
 	if (($zfs_props{$property}) && ($config{'zfs_properties'} =~ /1/)) { return 1; }
 	return 0;
 }
+return 0 if (!has_acl_permission('upool_properties'));
 if (($pool_props{$property}) && ($config{'pool_properties'} =~ /1/)) { return 1; }
 return 0;
 }
@@ -261,6 +423,7 @@ return %hash;
 sub list_snapshots
 {
 my ($snap) = @_;
+my %hash = ();
 my $cols = "name,".$config{'list_snap'};
 my ($flags, $target) = _parse_zfs_list_args($snap);
 my $cmd = "zfs list -t snapshot -H -o ".shell_quote($cols)." -s creation";
@@ -271,13 +434,14 @@ if (defined $target && $target ne "") {
 	$cmd .= " ".shell_quote($target);
 }
 $list=`$cmd`;
-$idx = 0;
+my $idx = 0;
 open my $fh, "<", \$list;
 while (my $line =<$fh>)
 {
     chomp ($line);
+    next if ($line eq '');
     my @props = split("\x09", $line);
-    $ct = 0;
+    my $ct = 0;
     foreach $prop (split(",", "name,".$config{'list_snap'})) {
 	    $hash{sprintf("%05d", $idx)}{$prop} = $props[$ct];
             $ct++;
@@ -869,7 +1033,6 @@ sub get_pool_only_property_keys {
 sub ui_zpool_properties
 {
 my ($pool) = @_;
-require './property-list-en.pl';
 my %hash = zpool_get($pool, "all");
 
 my @rows = ();
@@ -982,7 +1145,6 @@ print ui_columns_start([ "Pool Name", "Size", "Alloc", "Free", "Frag", "Cap", "D
 sub ui_zfs_properties
 {
 my ($zfs)=@_;
-require './property-list-en.pl';
 my %hash = zfs_get($zfs, "all");
 
 if (!$hash{$zfs}{'com.sun:auto-snapshot'}) { $hash{$zfs}{'com.sun:auto-snapshot'}{'value'} = '-'; }
@@ -1053,10 +1215,13 @@ sub ui_properties_columns
 sub ui_list_snapshots
 {
 my ($zfs, $admin) = @_;
+my $is_admin = (defined($admin) && $admin =~ /1/) ? 1 : 0;
+my $can_admin = ($is_admin && has_acl_permission('usnap_destroy')) ? 1 : 0;
 %snapshot = list_snapshots($zfs);
 @props = split(/,/, $config{list_snap});
-if ($admin =~ /1/) { 
+if ($can_admin) {
 	print ui_form_start('cmd.cgi', 'post');
+	print ui_csrf_hidden();
 	print ui_hidden('cmd', 'multisnap');
 	}
 print ui_columns_start([ "snapshot", @props ]);
@@ -1067,7 +1232,7 @@ foreach $key (sort(keys %snapshot))
 	foreach $prop (@props) { push (@vals, h($snapshot{$key}{$prop})); }
 	my $snap_name = $snapshot{$key}{name};
 	my $snap_link = "<a href='status.cgi?snap=".u($snap_name)."&xnavigation=1'>".h($snap_name)."</a>";
-	if ($admin =~ /1/) {
+	if ($can_admin) {
 		print ui_columns_row([ui_checkbox("select", $snap_name.";", $snap_link), @vals ]);
 		$num ++;
 	} else {
@@ -1075,16 +1240,18 @@ foreach $key (sort(keys %snapshot))
 	}
 }
 print ui_columns_end();
-if ($admin =~ /1/) { print select_all_link('select', '', "Select All"), " | ", select_invert_link('select', '', "Invert Selection") }
-if (($admin =~ /1/) && ($config{'snap_destroy'} =~ /1/)) { print " | ".ui_submit("Destroy selected snapshots"); }
-if ($admin =~ /1/) { print ui_form_end(); }
+if ($can_admin) { print select_all_link('select', '', "Select All"), " | ", select_invert_link('select', '', "Invert Selection") }
+if ($can_admin && ($config{'snap_destroy'} =~ /1/)) { print " | ".ui_submit("Destroy selected snapshots"); }
+if ($can_admin) { print ui_form_end(); }
 
 }
 
 sub ui_create_snapshot
 {
 my ($zfs) = @_;
+return '' if !has_acl_permission('uzfs_properties');
 $rv = ui_form_start('cmd.cgi', 'post')."\n";
+$rv .= ui_csrf_hidden()."\n";
 $rv .= "Create new snapshot based on filesystem: ".h($zfs)."<br />\n";
 my $date = strftime "zfs_manager_%Y-%m-%d-%H%M", localtime;
 $rv .= h($zfs)."@ ".ui_textbox('snap', $date, 28)."\n";
@@ -1104,7 +1271,9 @@ print "$text{'cmd_'.$in{'cmd'}} $msg_html $text{'cmd_with'}<br />\n";
 print "<i># ".$cmd_html."</i><br /><br />\n";
 if (!$in{'confirm'}) {
 	print ui_form_start('cmd.cgi', 'post');
+	print ui_csrf_hidden();
 	foreach $key (keys %in) {
+		next if ($key eq 'csrf_token');
 		print ui_hidden($key, $in{$key});
 	}
 	print ui_hidden('confirm', 'yes');
@@ -1186,7 +1355,9 @@ $rv = "Attempting to $message with command... <br />\n";
 $rv .= "<i># ".$cmd."</i><br /><br />\n";
 if (!$in{'confirm'}) {
         $rv .= ui_form_start('cmd.cgi', 'post');
+        $rv .= ui_csrf_hidden();
         foreach $key (keys %in) {
+                        next if ($key eq 'csrf_token');
                         $rv .= ui_hidden($key, $in{$key});
         }
         $rv .= "<h3>Would you like to continue?</h3>\n";
@@ -1226,7 +1397,10 @@ sub test_function
 }
 
 my %glabel_cache;
+my %glabel_reverse_cache;
 my $glabel_cached = 0;
+my %gpt_label_cache;
+my $gpt_label_cached = 0;
 
 sub resolve_glabel
 {
@@ -1237,12 +1411,101 @@ sub resolve_glabel
         my $out = `glabel status 2>/dev/null`;
         foreach my $line (split(/\n/, $out)) {
             if ($line =~ /^\s*(\S+)\s+\S+\s+(\S+)/) {
-                $glabel_cache{$1} = $2;
+                my $label = $1;
+                my $provider = $2;
+                $provider =~ s{^/dev/}{};
+                $glabel_cache{$label} = $provider;
+                $glabel_reverse_cache{$provider} ||= $label;
+                my $provider_base = $provider;
+                $provider_base =~ s{^.*/}{};
+                $glabel_reverse_cache{$provider_base} ||= $label if ($provider_base ne $provider);
             }
         }
         $glabel_cached = 1;
     }
     return $glabel_cache{$dev} || $dev;
+}
+
+sub get_disk_label
+{
+my ($dev, $dev_path) = @_;
+return "-" if (!defined($dev) || $dev eq "");
+return "-" if ($dev =~ /mirror|raidz|draid|spare|log|cache|special/);
+
+my $label = "-";
+
+if ($^O eq 'linux') {
+    my $cmd = "lsblk -P -no PARTLABEL,LABEL ".shell_quote($dev_path)." 2>/dev/null";
+    my $out = `$cmd`;
+    if ($out =~ /PARTLABEL="([^"]*)"/ && defined $1 && $1 ne '') {
+        $label = $1;
+    } elsif ($out =~ /LABEL="([^"]*)"/ && defined $1 && $1 ne '') {
+        $label = $1;
+    }
+}
+elsif ($^O eq 'freebsd') {
+    my $provider = $dev_path;
+    $provider =~ s{^/dev/}{};
+
+    if ($dev =~ m{^/dev/gpt/([^/]+)$}) {
+        $label = $1;
+    } elsif ($dev =~ m{^gpt/([^/]+)$}) {
+        $label = $1;
+    } elsif ($provider =~ m{^gpt/([^/]+)$}) {
+        $label = $1;
+    }
+
+    if (($label eq '-' || $label eq '') && !$gpt_label_cached) {
+        if (opendir(my $dh, "/dev/gpt")) {
+            while (my $entry = readdir($dh)) {
+                next if ($entry =~ /^\./);
+                my $path = "/dev/gpt/$entry";
+                my $target = readlink($path);
+                next if (!defined $target || $target eq '');
+                $target =~ s{\\}{/}g;
+                $target =~ s{^.*/}{};
+                next if ($target eq '');
+                $gpt_label_cache{$target} ||= $entry;
+            }
+            closedir($dh);
+        }
+        $gpt_label_cached = 1;
+    }
+
+    if (($label eq '-' || $label eq '') && $gpt_label_cache{$provider}) {
+        $label = $gpt_label_cache{$provider};
+    }
+
+    if ($label eq '-' || $label eq '') {
+        my ($base, $idx);
+        if ($provider =~ /^(nvme\d+n\d+)p(\d+)$/) {
+            ($base, $idx) = ($1, int($2));
+        } elsif ($provider =~ /^([a-z]+\d+)[ps](\d+)$/) {
+            ($base, $idx) = ($1, int($2));
+        }
+        if ($base && defined $idx) {
+            my $ds = get_disk_structure($base);
+            if ($ds && $ds->{'entries'}) {
+                foreach my $entry (@{$ds->{'entries'}}) {
+                    next unless ($entry->{'type'} eq 'partition' && $entry->{'index'} == $idx);
+                    if ($entry->{'label'} && $entry->{'label'} ne '(null)') {
+                        $label = $entry->{'label'};
+                    }
+                    last;
+                }
+            }
+        }
+    }
+
+    if (($label eq '-' || $label eq '') && $glabel_reverse_cache{$provider}) {
+        my $raw_label = $glabel_reverse_cache{$provider};
+        $raw_label =~ s{^gpt/}{};
+        $label = $raw_label if ($raw_label ne '');
+    }
+}
+
+$label = "-" if (!defined($label) || $label eq '');
+return $label;
 }
 
 sub get_smart_status
@@ -1287,7 +1550,7 @@ return "";
 sub get_disk_details
 {
 my ($dev) = @_;
-return ("-", "-", "-", "-") if ($dev =~ /mirror|raidz|draid|spare|log|cache|special/);
+return ("-", "-", "-", "-", "-") if ($dev =~ /mirror|raidz|draid|spare|log|cache|special/);
 
 my $dev_path = $dev;
 
@@ -1295,6 +1558,7 @@ my $dev_path = $dev;
 if ($^O eq 'freebsd') { $dev_path = resolve_glabel($dev); }
 
 if ($dev_path !~ /^\//) { $dev_path = "/dev/$dev_path"; }
+my $label = get_disk_label($dev, $dev_path);
 
 # Determine parent disk for Model/Serial/Temp
 my $parent_disk = $dev_path;
@@ -1302,7 +1566,7 @@ if ($parent_disk =~ m{^(/dev/nvme\d+n\d+)p\d+$}) { $parent_disk = $1; }
 elsif ($parent_disk =~ m{^(/dev/[a-z]+\d+)[ps]\d+.*$}) { $parent_disk = $1; }
 elsif ($parent_disk =~ m{^(/dev/[a-z]+)\d+$}) { $parent_disk = $1; }
 
-return ("-", "-", "-", "-") unless (-e $parent_disk);
+return ("-", "-", "-", "-", $label) unless (-e $parent_disk);
 
 my $model = "-";
 my $serial = "-";
@@ -1358,7 +1622,8 @@ $model ||= "-";
 $serial ||= "-";
 $temp ||= "-";
 $size ||= "-";
-return ($model, $serial, $temp, $size);
+$label ||= "-";
+return ($model, $serial, $temp, $size, $label);
 }
 
 sub get_type_description {
@@ -1668,7 +1933,7 @@ our %_zdb_label_cache;
 sub zdb_label_info {
     my ($dev) = @_;
     return $zdb_label_cache{$dev} if (exists $zdb_label_cache{$dev});
-    my $out = backquote_command("zdb -l $dev 2>/dev/null");
+    my $out = backquote_command("zdb -l ".shell_quote($dev)." 2>/dev/null");
     if ($out =~ /pool_guid:\s+(\d+)/) {
         my $guid = $1;
         my ($name) = $out =~ /name:\s+'([^']+)'/;

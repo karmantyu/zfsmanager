@@ -1,7 +1,10 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 require './zfsmanager-lib.pl';
 &ReadParse();
+my $can_pool_props = has_acl_permission('upool_properties');
+my $can_zfs_props = has_acl_permission('uzfs_properties');
+my $can_snap_destroy = has_acl_permission('usnap_destroy');
 ui_print_header(undef, $text{'index_title'}, "", undef, 1, 1, 0, "<a href='about.cgi'>About ZFS Manager</a><br />".&help_search_link("zfs, zpool", "man", "doc", "google"), undef, undef, $text{'index_version'} );
 
 #start tabs
@@ -15,7 +18,7 @@ print &ui_tabs_start(\@tabs, "mode", $in{'mode'} || $tabs[0]->[0], 1);
 print &ui_tabs_start_tab("mode", "pools");
 
 ui_zpool_list();
-if ($config{'pool_properties'} =~ /1/) { 
+if (($config{'pool_properties'} =~ /1/) && $can_pool_props) {
 	print "<a href='create.cgi?create=zpool&xnavigation=1'>Create new pool</a>";
 	print " | ";
 	print "<a href='create.cgi?import=1&xnavigation=1'>Import pool</a>"; 
@@ -27,15 +30,15 @@ print &ui_tabs_start_tab("mode", "zfs");
 
 print "<div>"; #div tags are needed for new theme apparently
 ui_zfs_list();
-if ($config{'zfs_properties'} =~ /1/) { print "<a href='create.cgi?create=zfs&xnavigation=1'>Create file system</a>"; }
+if (($config{'zfs_properties'} =~ /1/) && $can_zfs_props) { print "<a href='create.cgi?create=zfs&xnavigation=1'>Create file system</a>"; }
 print "</div>";
 print &ui_tabs_end_tab("mode", "zfs");
 
 #start snapshots tab
 if ($config{'show_snap'} =~ /1/) {
 print &ui_tabs_start_tab("mode", "snapshot");
-ui_list_snapshots(undef, 1);
-if ($config{'snap_properties'} =~ 1) { print "<a href='create.cgi?create=snapshot&xnavigation=1'>Create snapshot</a>"; }
+ui_list_snapshots(undef, $can_snap_destroy ? 1 : 0);
+if (($config{'snap_properties'} =~ 1) && $can_zfs_props) { print "<a href='create.cgi?create=snapshot&xnavigation=1'>Create snapshot</a>"; }
 print &ui_tabs_end_tab("mode", "snapshot");
 }
 

@@ -1,7 +1,12 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 require './zfsmanager-lib.pl';
 ReadParse();
+my $can_pool_props = has_acl_permission('upool_properties');
+my $can_pool_destroy = has_acl_permission('upool_destroy');
+my $can_zfs_props = has_acl_permission('uzfs_properties');
+my $can_zfs_destroy = has_acl_permission('uzfs_destroy');
+my $can_snap_destroy = has_acl_permission('usnap_destroy');
 
 #show pool status
 if ($in{'pool'})
@@ -23,22 +28,21 @@ ui_zfs_list("-r ".$in{'pool'});
 #TODO: show devices by vdev hierarchy
 my %status = zpool_status($in{'pool'});
 if (scalar(keys %status) > 1) {
-print ui_columns_start([ "Device Name", "State", "Read", "Write", "Cksum", "Model", "Serial", "Temp", "SMART", "Action" ]);
+print ui_columns_start([ "Device Name", "Label", "State", "Read", "Write", "Cksum", "Model", "Serial", "Temp", "SMART", "Action" ]);
 foreach $key (sort {$a <=> $b} (keys %status))
 {
 	my $smart = get_smart_status($status{$key}{name});
-	my ($model, $serial, $temp) = get_disk_details($status{$key}{name});
+	my ($model, $serial, $temp, undef, $label) = get_disk_details($status{$key}{name});
 	my $action = "";
-	if ($status{$key}{state} !~ /ONLINE/ && $status{$key}{name} !~ /^(mirror|raidz|draid|spare|log|cache|special)/) {
-		my $pool_q = u($status{0}{pool});
-		my $vdev_q = u($status{$key}{name});
-		my $vdev_js = js_escape($status{$key}{name});
-		$action = "<a href='cmd.cgi?cmd=replace&pool=$pool_q&vdev=$vdev_q&xnavigation=1' onClick='return confirm(\"Are you sure you want to replace disk $vdev_js?\")'>Replace Disk</a>";
+	if ($can_pool_props && $status{$key}{state} !~ /ONLINE/ && $status{$key}{name} !~ /^(mirror|raidz|draid|spare|log|cache|special)/) {
+		$action = ui_post_action_link('Replace Disk', 'cmd.cgi',
+			{ 'cmd' => 'replace', 'pool' => $status{0}{pool}, 'vdev' => $status{$key}{name}, 'xnavigation' => 1 },
+			"Are you sure you want to replace disk ".$status{$key}{name}."?");
 	}
 	if (($status{$key}{parent} =~ /pool/) && ($key != 0)) {
-		print ui_columns_row(["<a href='config-vdev.cgi?pool=".u($status{0}{pool}).'&dev='.$key."&xnavigation=1'>".h($status{$key}{name})."</a>", h($status{$key}{state}), h($status{$key}{read}), h($status{$key}{write}), h($status{$key}{cksum}), h($model), h($serial), h($temp), $smart, $action]);
+		print ui_columns_row(["<a href='config-vdev.cgi?pool=".u($status{0}{pool}).'&dev='.$key."&xnavigation=1'>".h($status{$key}{name})."</a>", h($label), h($status{$key}{state}), h($status{$key}{read}), h($status{$key}{write}), h($status{$key}{cksum}), h($model), h($serial), h($temp), $smart, $action]);
 	} elsif ($key != 0) {
-		print ui_columns_row(["<a href='config-vdev.cgi?pool=".u($status{0}{pool}).'&dev='.$key."&xnavigation=1'>|_".h($status{$key}{name})."</a>", h($status{$key}{state}), h($status{$key}{read}), h($status{$key}{write}), h($status{$key}{cksum}), h($model), h($serial), h($temp), $smart, $action]);
+		print ui_columns_row(["<a href='config-vdev.cgi?pool=".u($status{0}{pool}).'&dev='.$key."&xnavigation=1'>|_".h($status{$key}{name})."</a>", h($label), h($status{$key}{state}), h($status{$key}{read}), h($status{$key}{write}), h($status{$key}{cksum}), h($model), h($serial), h($temp), $smart, $action]);
 	}
 	
 }
@@ -63,15 +67,35 @@ if ($status{0}{status} or $status{0}{action} or $status{pool}{see}) {
 
 #--tasks table--
 print ui_table_start("Tasks", "width=100%", "10", ['align=left'] );
-print ui_table_row("New file system: ", "<a href='create.cgi?create=zfs&parent=".u($in{pool})."&xnavigation=1'>Create file system</a>"); 
-if ($status{0}{scan} =~ /scrub in progress/) { print ui_table_row('Scrub ',"<a href='cmd.cgi?cmd=scrub&stop=y&pool=".u($in{pool})."&xnavigation=1'>Stop scrub</a>"); } 
-else {
-	my $pool_js = js_escape($in{pool});
-	print ui_table_row('Scrub ', "<a href='cmd.cgi?cmd=scrub&pool=".u($in{pool})."&xnavigation=1' onClick='return confirm(\"Are you sure you want to scrub pool $pool_js?\")'>Scrub pool</a>");
+my $pool_task_rows = 0;
+if ($can_zfs_props) {
+	print ui_table_row("New file system: ", "<a href='create.cgi?create=zfs&parent=".u($in{pool})."&xnavigation=1'>Create file system</a>");
+	$pool_task_rows++;
 }
-print ui_table_row('Upgrade ', "<a href='cmd.cgi?cmd=upgrade&pool=".u($in{pool})."&xnavigation=1'>Upgrade pool</a>");
-print ui_table_row('Export ',  "<a href='cmd.cgi?cmd=export&pool=".u($in{pool})."&xnavigation=1'>Export pool</a>");
-print ui_table_row("Destroy ", "<a href='create.cgi?destroy_pool=".u($in{pool})."&xnavigation=1'>Destroy this pool</a>");
+if ($can_pool_props) {
+	if ($status{0}{scan} =~ /scrub in progress/) {
+		print ui_table_row('Scrub ', ui_post_action_link('Stop scrub', 'cmd.cgi',
+			{ 'cmd' => 'scrub', 'stop' => 'y', 'pool' => $in{pool}, 'xnavigation' => 1 }));
+	} else {
+		print ui_table_row('Scrub ', ui_post_action_link('Scrub pool', 'cmd.cgi',
+			{ 'cmd' => 'scrub', 'pool' => $in{pool}, 'xnavigation' => 1 },
+			"Are you sure you want to scrub pool ".$in{pool}."?"));
+	}
+	$pool_task_rows++;
+	print ui_table_row('Upgrade ', ui_post_action_link('Upgrade pool', 'cmd.cgi',
+		{ 'cmd' => 'upgrade', 'pool' => $in{pool}, 'xnavigation' => 1 }));
+	$pool_task_rows++;
+	print ui_table_row('Export ', ui_post_action_link('Export pool', 'cmd.cgi',
+		{ 'cmd' => 'export', 'pool' => $in{pool}, 'xnavigation' => 1 }));
+	$pool_task_rows++;
+}
+if ($can_pool_destroy) {
+	print ui_table_row("Destroy ", "<a href='create.cgi?destroy_pool=".u($in{pool})."&xnavigation=1'>Destroy this pool</a>");
+	$pool_task_rows++;
+}
+if (!$pool_task_rows) {
+	print ui_table_row("Info", "No actions available for your ACL.");
+}
 print ui_table_end();
 
 ui_print_footer('index.cgi?xnavigation=1', $text{'index_return'});
@@ -93,16 +117,38 @@ if ($in{'zfs'})
 	ui_zfs_list("-r -d1 ".$in{'zfs'}, undef, $in{'zfs'});
 	
 	#show list of snapshots based on filesystem
-	ui_list_snapshots('-rd1 '.$in{'zfs'}, 1);
+	ui_list_snapshots('-rd1 '.$in{'zfs'}, $can_snap_destroy ? 1 : 0);
 	my %hash = zfs_get($in{'zfs'}, "all");
 	
 	#--tasks table--
 	print ui_table_start("Tasks", "width=100%", "10");
-	print ui_table_row("Snapshot: ", ui_create_snapshot($in{'zfs'}));
-print ui_table_row("New file system: ", "<a href='create.cgi?create=zfs&parent=".u($in{'zfs'})."&xnavigation=1'>Create child file system</a>"); 
-if (index($in{'zfs'}, '/') != -1) { print ui_table_row("Rename: ", "<a href='create.cgi?rename=".u($in{'zfs'})."&xnavigation=1'>Rename ".h($in{'zfs'})."</a>"); }
-if ($hash{$in{'zfs'}}{origin}) { print ui_table_row("Promote: ", "This file system is a clone, <a href='cmd.cgi?cmd=promote&zfs=".u($in{zfs})."&xnavigation=1'>promote ".h($in{zfs})."</a>"); }
-print ui_table_row("Destroy: ", "<a href='create.cgi?destroy_zfs=".u($in{zfs})."&xnavigation=1'>Destroy this file system</a>");
+	my $zfs_task_rows = 0;
+	if ($can_zfs_props) {
+		my $snap_form = ui_create_snapshot($in{'zfs'});
+		if ($snap_form ne '') {
+			print ui_table_row("Snapshot: ", $snap_form);
+			$zfs_task_rows++;
+		}
+		print ui_table_row("New file system: ", "<a href='create.cgi?create=zfs&parent=".u($in{'zfs'})."&xnavigation=1'>Create child file system</a>");
+		$zfs_task_rows++;
+		if (index($in{'zfs'}, '/') != -1) {
+			print ui_table_row("Rename: ", "<a href='create.cgi?rename=".u($in{'zfs'})."&xnavigation=1'>Rename ".h($in{'zfs'})."</a>");
+			$zfs_task_rows++;
+		}
+		if ($hash{$in{'zfs'}}{origin}) {
+			print ui_table_row("Promote: ", "This file system is a clone, ".
+				ui_post_action_link('promote '.$in{zfs}, 'cmd.cgi',
+				{ 'cmd' => 'promote', 'zfs' => $in{zfs}, 'xnavigation' => 1 }));
+			$zfs_task_rows++;
+		}
+	}
+	if ($can_zfs_destroy) {
+		print ui_table_row("Destroy: ", "<a href='create.cgi?destroy_zfs=".u($in{zfs})."&xnavigation=1'>Destroy this file system</a>");
+		$zfs_task_rows++;
+	}
+	if (!$zfs_task_rows) {
+		print ui_table_row("Info", "No actions available for your ACL.");
+	}
 	print ui_table_end();
 	ui_print_footer('index.cgi?mode=zfs&xnavigation=1', $text{'zfs_return'});
 	
@@ -130,12 +176,19 @@ if ($in{'snap'})
 	#--tasks table--
 	print ui_table_start('Tasks', 'width=100%', undef);
 print ui_table_row('Differences', "<a href='diff.cgi?snap=".u($in{snap})."&xnavigation=1'>Show differences in ".h($in{'snap'})."</a>");
-print ui_table_row("Snapshot: ", ui_create_snapshot($zfs));
-print ui_table_row("Rename: ", "<a href='create.cgi?rename=".u($in{'snap'})."&xnavigation=1'>Rename ".h($in{'snap'})."</a>");
-print ui_table_row("Send: ", "<a href='cmd.cgi?cmd=send&snap=".u($in{'snap'})."&xnavigation=1'>Send ".h($in{'snap'})." to gzip</a>");
-print ui_table_row('Clone:', "<a href='create.cgi?clone=".u($in{snap})."&xnavigation=1'>Clone ".h($in{'snap'})." to new file system</a>"); 
+if ($can_zfs_props) {
+	my $snap_form = ui_create_snapshot($zfs);
+	if ($snap_form ne '') { print ui_table_row("Snapshot: ", $snap_form); }
+	print ui_table_row("Rename: ", "<a href='create.cgi?rename=".u($in{'snap'})."&xnavigation=1'>Rename ".h($in{'snap'})."</a>");
+	print ui_table_row("Send: ", ui_post_action_link('Send '.$in{'snap'}.' to gzip', 'cmd.cgi',
+		{ 'cmd' => 'send', 'snap' => $in{'snap'}, 'xnavigation' => 1 }));
+	print ui_table_row('Clone:', "<a href='create.cgi?clone=".u($in{snap})."&xnavigation=1'>Clone ".h($in{'snap'})." to new file system</a>");
+}
 print ui_table_row('Rollback:', "Rollback ".h($zfs)." to ".h($in{'snap'}));
-print ui_table_row('Destroy:',"<a href='cmd.cgi?cmd=snpdestroy&snapshot=".u($in{snap})."&xnavigation=1'>Destroy snapshot</a>", );
+if ($can_snap_destroy) {
+	print ui_table_row('Destroy:', ui_post_action_link('Destroy snapshot', 'cmd.cgi',
+		{ 'cmd' => 'snpdestroy', 'snapshot' => $in{snap}, 'xnavigation' => 1 }), );
+}
 	print ui_table_end();
 	%parent = find_parent($in{'snap'});
 ui_print_footer('status.cgi?zfs='.u($parent{'filesystem'}).'&xnavigation=1', h($parent{'filesystem'}));

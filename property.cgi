@@ -1,11 +1,15 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 require './zfsmanager-lib.pl';
-require './property-list-en.pl';
 ReadParse();
 use Data::Dumper;
+
+if ($in{'zfs'} && !is_valid_zfs_name($in{'zfs'})) { error($text{'error_invalid_zfs'} || "Invalid filesystem name"); }
+if ($in{'pool'} && !is_valid_pool_name($in{'pool'})) { error($text{'error_invalid_pool'} || "Invalid pool name"); }
+if ($in{'property'} && !is_valid_property_name($in{'property'})) { error($text{'error_invalid_property'} || "Invalid property name"); }
+if ($in{'zfs'} && $in{'pool'}) { error("Specify either zfs or pool, not both"); }
+
 ui_print_header(undef, $text{'property_title'}, "", undef, 1, 1);
-%props =  property_desc();
 %pool_proplist = pool_properties_list();
 %proplist = properties_list();
 
@@ -28,8 +32,6 @@ if ($in{'zfs'}) {
 my $desc = undef;
 if ($text{'prop_'.$in{'property'}}) {
 	$desc = $text{'prop_'.$in{'property'}};
-} elsif ($props{$in{'property'}}) {
-	$desc = $props{$in{'property'}};
 }
 if ($desc) {
 	print "<b>Description:</b><br />";
@@ -42,25 +44,27 @@ print ui_table_end();
 #this is where we see if we can/and how to edit zfs properties
 if (can_edit($in{'zfs'}, $in{'property'}) =~ 1) {
 print ui_form_start('cmd.cgi', 'post');
+print ui_csrf_hidden();
 print ui_hidden('property', $in{'property'});
 print ui_hidden('zfs', $in{'zfs'});
 print ui_hidden('pool', $in{'pool'});
 if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} =~ 'unavailable') {
-        print ui_hidden('cmd', 'load-key');
-        print "<a href='cmd.cgi?zfs=".u($in{'zfs'})."&cmd=zfsact&action=load-key'>Load key</a>";
-        #print ui_submit('submit'), "<br />";
+        print ui_hidden('cmd', 'zfsact');
+        print ui_hidden('action', 'load-key');
+        print ui_submit('Load key'), "<br />";
 } elsif ($in{'property'} =~ 'mountpoint') {
 	print ui_hidden('cmd', 'setzfs');
 	print ui_filebox('set', $get{$in{'zfs'}}{$in{'property'}}{value}, 0, undef, undef, 1);
 	print ui_submit('submit'), "<br />";
 } elsif ($in{'property'} =~ 'mounted') {
 	if ($get{$in{'zfs'}}{$in{'property'}}{value} =~ 'yes') {
-		#fix this to a post command
-		print ui_hidden('cmd', "unmount");
-		print "<a href='cmd.cgi?zfs=".u($in{'zfs'})."&cmd=zfsact&action=unmount'>Unmount this file system</a>";
+		print ui_hidden('cmd', 'zfsact');
+		print ui_hidden('action', 'unmount');
+		print ui_submit('Unmount this file system');
 	} else {
-		print ui_hidden('cmd', "mount");
-		print "<a href='cmd.cgi?zfs=".u($in{'zfs'})."&cmd=zfsact&action=mount'>Mount this file system</a>";
+		print ui_hidden('cmd', 'zfsact');
+		print ui_hidden('action', 'mount');
+		print ui_submit('Mount this file system');
 	}
 } elsif ($in{'property'} =~ 'comment') {
 	print ui_hidden('cmd', 'setpool') ;

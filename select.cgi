@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 #deprecated
 require './zfsmanager-lib.pl';

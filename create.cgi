@@ -1,7 +1,17 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 require './zfsmanager-lib.pl';
 ReadParse();
+
+if ($in{'pool'} && !is_valid_pool_name($in{'pool'})) { error($text{'error_invalid_pool'} || "Invalid pool name"); }
+if ($in{'parent'} && !is_valid_zfs_name($in{'parent'}) && !is_valid_pool_name($in{'parent'})) { error("Invalid parent name"); }
+if ($in{'zfs'} && !is_valid_zfs_name($in{'zfs'})) { error($text{'error_invalid_zfs'} || "Invalid filesystem name"); }
+if ($in{'rename'} && !is_valid_zfs_name($in{'rename'})) { error("Invalid rename target"); }
+if ($in{'destroy_zfs'} && !is_valid_zfs_name($in{'destroy_zfs'})) { error("Invalid filesystem name"); }
+if ($in{'destroy_pool'} && !is_valid_pool_name($in{'destroy_pool'})) { error("Invalid pool name"); }
+if ($in{'clone'} && !is_valid_zfs_name($in{'clone'})) { error("Invalid snapshot name"); }
+if ($in{'dir'} && $in{'dir'} =~ /[\r\n\0]/) { error("Invalid directory path"); }
+
 my %createopts = create_opts();
 my %proplist = properties_list();
 my %fs_descriptions = (
@@ -49,8 +59,10 @@ my %acl_tooltips = (
 #create zpool
 if ($in{'create'} =~ "zpool")
 {
+	require_acl_permission('upool_properties', 'Permission denied');
 	ui_print_header(undef, "Create Pool", "", undef, 1, 0);
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validatePool(this)'");
+	print ui_csrf_hidden();
 	print ui_hidden('cmd', 'createzpool');
 	print ui_hidden('create', 'zpool');
 
@@ -227,11 +239,13 @@ EOF
 #create zfs file system
 #TODO the $in{'pool'} variable should be changed to $in{'parent'}, but it still works
 } elsif (($in{'create'} =~ "zfs") & ($in{'parent'} eq undef)) {
+	require_acl_permission('uzfs_properties', 'Permission denied');
 	ui_print_header(undef, "Create File System", "", undef, 1, 0);
 	print "<b>Select parent for file system</b>";
 	ui_zfs_list(undef, "create.cgi?create=zfs&xnavigation=1&parent=");
 	@footer = ('index.cgi?mode=zfs&xnavigation=1', $text{'zfs_return'});
 } elsif (($in{'create'} =~ "zfs")) {
+	require_acl_permission('uzfs_properties', 'Permission denied');
 	ui_print_header(undef, "Create File System", "", undef, 1, 0);
 	#Show associated file systems
 	
@@ -246,6 +260,7 @@ EOF
 	print &ui_tabs_start_tab("mode", "zfs");
 	
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateFsForm(this)'");
+	print ui_csrf_hidden();
 	print ui_table_start('New File System', 'width=100%', '2');
 	print ui_table_row("Name:", h($in{'parent'})."/".ui_textbox('zfs'));
 	print ui_table_row("Mount point:", ui_filebox('mountpoint', '', 25, undef, undef, 1)." (blank for default)");
@@ -283,6 +298,7 @@ EOF
 
 	print &ui_tabs_start_tab("mode", "zvol");
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateZvolForm(this)'");
+	print ui_csrf_hidden();
 	print ui_table_start('New Volume', 'width=100%', '2');
 	print ui_table_row("Name:", h($in{'parent'})."/".ui_textbox('zfs'));
 	print ui_table_row("Size:", ui_textbox('size', undef, 20, undef, undef, "oninput='updateRefres()'"));
@@ -431,6 +447,7 @@ EOF
 	$in{'zfs'} = $in{'parent'};
 	
 } elsif ($in{'import'}) {
+	require_acl_permission('upool_properties', 'Permission denied');
 	ui_print_header(undef, "Import Pool", "", undef, 1, 0);
 	print ui_form_start("create.cgi", "get");
 	print ui_hidden('import', '1');
@@ -460,10 +477,10 @@ EOF
 				my $pool = $imports{$key}{pool};
 				my $id = $imports{$key}{'id'};
 				my $state = $imports{$key}{'state'};
-				my $dir_param = u($in{'dir'});
-				my $destroyed_param = u($in{destroyed});
-				my $pool_link = "<a href='cmd.cgi?cmd=import&import=".u($pool)."&dir=$dir_param&destroyed=$destroyed_param&xnavigation=1'>".h($pool)."</a>";
-				my $id_link = "<a href='cmd.cgi?cmd=import&import=".u($id)."&dir=$dir_param&destroyed=$destroyed_param&xnavigation=1'>".h($id)."</a>";
+				my $pool_link = ui_post_action_link($pool, 'cmd.cgi',
+					{ 'cmd' => 'import', 'import' => $pool, 'dir' => $in{'dir'}, 'destroyed' => $in{'destroyed'}, 'xnavigation' => 1 });
+				my $id_link = ui_post_action_link($id, 'cmd.cgi',
+					{ 'cmd' => 'import', 'import' => $id, 'dir' => $in{'dir'}, 'destroyed' => $in{'destroyed'}, 'xnavigation' => 1 });
 				print ui_columns_row([$pool_link, $id_link, h($state)]);
 			}
 			print ui_columns_end();
@@ -471,9 +488,11 @@ EOF
 	}
 	@footer = ('index.cgi?xnavigation=1', $text{'index_return'});
 } elsif ($in{'clone'}) {
+	require_acl_permission('uzfs_properties', 'Permission denied');
 	ui_print_header(undef, "Clone Snapshot", "", undef, 1, 0);
 	my %parent = find_parent($in{'clone'});
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateClone(this)'");
+	print ui_csrf_hidden();
 	print ui_table_start('Clone Snapshot', 'width=100%', '6');
 	print ui_table_row(undef, '<b>Snapshot:</b> '.h($in{'clone'}));
 	print ui_table_row(undef, "<b>Name: </b>".$parent{'pool'}."/".ui_textbox('zfs'));
@@ -522,8 +541,10 @@ function validateClone(form) {
 EOF
 	$in{'snap'} = $in{'clone'};
 } elsif ($in{'destroy_zfs'}) {
+	require_acl_permission('uzfs_destroy', 'Permission denied');
 	ui_print_header(undef, "Destroy Filesystem", "", undef, 1, 0);
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateDestroy(this)'");
+	print ui_csrf_hidden();
 	print ui_table_start('Destroy Filesystem', 'width=100%', '6');
 	print "<tr><td colspan='2'>";
 	print "<b>Filesystem:</b> ".h($in{'destroy_zfs'})."<br /><br />";
@@ -557,8 +578,10 @@ function validateDestroy(form) {
 EOF
 	@footer = ("status.cgi?zfs=".u($in{'destroy_zfs'})."&xnavigation=1", h($in{'destroy_zfs'}));
 } elsif ($in{'destroy_pool'}) {
+	require_acl_permission('upool_destroy', 'Permission denied');
 	ui_print_header(undef, "Destroy Pool", "", undef, 1, 0);
 	print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateDestroy(this)'");
+	print ui_csrf_hidden();
 	print ui_table_start('Destroy Pool', 'width=100%', '6');
 	print "<tr>";
 	print "<td valign='top' width='45%'>";
@@ -595,8 +618,10 @@ function validateDestroy(form) {
 EOF
 	@footer = ("status.cgi?pool=".u($in{'destroy_pool'})."&xnavigation=1", h($in{'destroy_pool'}));
 } elsif ($in{'rename'}) {
+	require_acl_permission('uzfs_properties', 'Permission denied');
 	ui_print_header(undef, "Rename", "", undef, 1, 0);
     print ui_form_start("cmd.cgi", "post", undef, "onsubmit='return validateRename(this)'");
+	print ui_csrf_hidden();
 	%parent = find_parent($in{'rename'});
 	if (index($in{'rename'}, '@') != -1) {
 		#is snapshot
@@ -639,6 +664,7 @@ function validateRename(form) {
 EOF
 	$in{'zfs'} = $in{'rename'};
 } elsif (($in{'create'} =~ "snapshot") &&  ($in{'zfs'} eq undef)) {
+	require_acl_permission('uzfs_properties', 'Permission denied');
 	ui_print_header(undef, $text{'snapshot_new'}, "", undef, 1, 0);
 	%zfs = list_zfs();
 	print ui_columns_start([ "File System", "Used", "Avail", "Refer", "Mountpoint" ]);
@@ -651,6 +677,7 @@ EOF
 	@footer = ('index.cgi?mode=snapshot&xnavigation=1', $text{'snapshot_return'});
 #handle creation of snapshot
 } elsif ($in{'create'} =~ "snapshot") {
+	require_acl_permission('uzfs_properties', 'Permission denied');
 	ui_print_header(undef, $text{'snapshot_create'}, "", undef, 1, 0);
 	%zfs = list_zfs($in{'zfs'});
 	print ui_columns_start([ "File System", "Used", "Avail", "Refer", "Mountpoint" ]);
