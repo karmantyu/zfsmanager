@@ -2,6 +2,125 @@
 
 require './zfsmanager-lib.pl';
 ReadParse();
+
+sub parse_scrub_scan_metrics
+{
+my ($scan_lines) = @_;
+my @lines = ref($scan_lines) eq 'ARRAY'
+	? grep { defined($_) && $_ ne '' } @$scan_lines
+	: ();
+
+my %scan = (
+	raw_lines => \@lines,
+	summary => '',
+	time => '',
+	time_label => '',
+	scanned => '',
+	scan_rate => '',
+	issued => '',
+	issue_rate => '',
+	repaired => '',
+	progress_pct => '',
+	progress_num => undef,
+	eta => '',
+	eta_is_duration => 0,
+	in_progress => 0,
+);
+
+return \%scan unless @lines;
+
+my $headline = $lines[0];
+if ($headline =~ /^(.*)\s+since\s+(.+?)\s*$/i) {
+	$scan{summary} = $1;
+	$scan{time} = $2;
+	$scan{time_label} = 'Started';
+} elsif ($headline =~ /^(.*)\s+on\s+(.+?)\s*$/i) {
+	$scan{summary} = $1;
+	$scan{time} = $2;
+	$scan{time_label} = 'Completed';
+} else {
+	$scan{summary} = $headline;
+}
+
+$scan{in_progress} = ($scan{summary} =~ /scrub in progress/i) ? 1 : 0;
+
+if (@lines > 1) {
+	my $line2 = $lines[1];
+	if ($line2 =~ /^(.+?)\s+scanned(?:\s+at\s+([^,]+))?,\s+(.+?)\s+issued(?:\s+at\s+(.+?))?\s*$/i) {
+		$scan{scanned} = $1;
+		$scan{scan_rate} = $2 if defined $2;
+		$scan{issued} = $3 if defined $3;
+		$scan{issue_rate} = $4 if defined $4;
+	} elsif ($line2 =~ /^(.+?)\s+scanned(?:\s+at\s+(.+?))?\s*$/i) {
+		$scan{scanned} = $1;
+		$scan{scan_rate} = $2 if defined $2;
+	}
+}
+
+if (@lines > 2) {
+	if ($lines[2] =~ /^(.+?)\s+repaired,\s+([0-9]+(?:\.[0-9]+)?)%\s+done,\s+(.+?)\s+to go\s*$/i) {
+		$scan{repaired} = $1;
+		$scan{progress_pct} = $2 . '%';
+		$scan{progress_num} = $2 + 0;
+		$scan{eta} = $3;
+		$scan{eta_is_duration} = 1;
+	} elsif ($lines[2] =~ /^(.+?)\s+repaired,\s+([0-9]+(?:\.[0-9]+)?)%\s+done,\s+(.+?)\s*$/i) {
+		$scan{repaired} = $1;
+		$scan{progress_pct} = $2 . '%';
+		$scan{progress_num} = $2 + 0;
+		$scan{eta} = $3;
+		$scan{eta_is_duration} = 0;
+	} elsif ($lines[2] =~ /^(.+?)\s+repaired,\s+([0-9]+(?:\.[0-9]+)?)%\s+done\s*$/i) {
+		$scan{repaired} = $1;
+		$scan{progress_pct} = $2 . '%';
+		$scan{progress_num} = $2 + 0;
+	} elsif ($lines[2] =~ /^(.+?)\s+repaired(?:,|\s*$)/i) {
+		$scan{repaired} = $1;
+	}
+}
+
+for my $key (qw(summary time scanned scan_rate issued issue_rate repaired progress_pct eta)) {
+	$scan{$key} = '' unless defined $scan{$key};
+	$scan{$key} =~ s/\s+/ /g;
+	$scan{$key} =~ s/^\s+|\s+$//g;
+}
+
+return \%scan;
+}
+
+sub get_pool_scan_details
+{
+my ($pool) = @_;
+my $cmdline = "zpool status";
+if (defined $pool && $pool ne "") {
+	$cmdline .= " ".shell_quote($pool);
+}
+my $cmd = `$cmdline`;
+my @scan_lines = ();
+my $in_scan = 0;
+
+foreach my $line (split(/\n/, $cmd)) {
+	chomp($line);
+	if ($line =~ /^\s*scan:\s*(.*?)\s*$/) {
+		push @scan_lines, $1 if defined($1) && $1 ne '';
+		$in_scan = 1;
+		next;
+	}
+	next unless $in_scan;
+	last if ($line =~ /^\s*(?:pool|state|status|action|see|scan|config|errors):/i);
+	if ($line =~ /^\s+(.*?)\s*$/) {
+		my $cont = $1;
+		if (defined($cont) && $cont ne '') {
+			push @scan_lines, $cont;
+			next;
+		}
+	}
+	last if ($line !~ /^\s*$/);
+}
+
+return parse_scrub_scan_metrics(\@scan_lines);
+}
+
 my $can_pool_props = has_acl_permission('upool_properties');
 my $can_pool_destroy = has_acl_permission('upool_destroy');
 my $can_zfs_props = has_acl_permission('uzfs_properties');
@@ -27,7 +146,9 @@ ui_zfs_list("-r ".$in{'pool'});
 #Show device configuration
 #TODO: show devices by vdev hierarchy
 my %status = zpool_status($in{'pool'});
-if (scalar(keys %status) > 1) {
+my $scan = get_pool_scan_details($in{'pool'});
+my $has_device_rows = scalar(keys %status) > 1;
+if ($has_device_rows) {
 print ui_columns_start([ "Device Name", "Label", "State", "Read", "Write", "Cksum", "Model", "Serial", "Temp", "SMART", "Action" ]);
 foreach $key (sort {$a <=> $b} (keys %status))
 {
@@ -49,10 +170,37 @@ foreach $key (sort {$a <=> $b} (keys %status))
 print ui_columns_end();
 }
 print ui_table_start("Status", "width=100%", 2, [ { 'width' => '15%' }, { 'width' => '85%' } ]);
-print ui_table_row("<b>Scan:</b>", h($status{0}{scan}));
-print ui_table_row("<b>Read:</b>", h($status{0}{read}));
-print ui_table_row("<b>Write:</b>", h($status{0}{write}));
-print ui_table_row("<b>Checksum:</b>", h($status{0}{cksum}));
+my $scan_summary = $scan->{summary} || $status{0}{scan} || '';
+my $show_pool_io_counters = !$has_device_rows ||
+	($status{0}{read} && $status{0}{read} ne '0') ||
+	($status{0}{write} && $status{0}{write} ne '0') ||
+	($status{0}{cksum} && $status{0}{cksum} ne '0');
+print ui_table_row("<b>Scan:</b>", h($scan_summary));
+if ($scan->{in_progress}) {
+	print ui_table_row("<b>Started:</b>", h($scan->{time})) if $scan->{time};
+	print ui_table_row("<b>Progress:</b>", h($scan->{progress_pct})) if $scan->{progress_pct};
+	print ui_table_row("<b>Scanned:</b>", h($scan->{scanned}.($scan->{scan_rate} ? " at ".$scan->{scan_rate} : '')))
+		if ($scan->{scanned} || $scan->{scan_rate});
+	print ui_table_row("<b>Issued:</b>", h($scan->{issued}.($scan->{issue_rate} ? " at ".$scan->{issue_rate} : '')))
+		if ($scan->{issued} || $scan->{issue_rate});
+	print ui_table_row("<b>Repaired:</b>", h($scan->{repaired})) if $scan->{repaired};
+	if ($scan->{eta}) {
+		my $eta_text = $scan->{eta};
+		$eta_text .= " to go" if $scan->{eta_is_duration};
+		print ui_table_row("<b>ETA:</b>", h($eta_text));
+	}
+	if (@{$scan->{raw_lines}} > 1 && !$scan->{scanned} && !$scan->{issued} && !$scan->{repaired} && !$scan->{eta}) {
+		my @extra_scan_lines = @{$scan->{raw_lines}};
+		shift @extra_scan_lines;
+		my $scan_details = join("<br />", map { h($_) } @extra_scan_lines);
+		print ui_table_row("<b>Scan details:</b>", $scan_details) if $scan_details ne '';
+	}
+}
+if ($show_pool_io_counters) {
+	print ui_table_row("<b>Read:</b>", h($status{0}{read}));
+	print ui_table_row("<b>Write:</b>", h($status{0}{write}));
+	print ui_table_row("<b>Checksum:</b>", h($status{0}{cksum}));
+}
 print ui_table_row("<b>Errors:</b>", h($status{0}{errors}));
 print ui_table_end();
 

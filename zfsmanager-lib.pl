@@ -122,18 +122,18 @@ sub ui_post_action_link
 	$script ||= 'cmd.cgi';
 	$ui_post_action_link_counter++;
 	my $id = "zfsmgr_post_".$ui_post_action_link_counter;
-	my $confirm_js = '';
+	my $confirm_attr = '';
 	if (defined $confirm_text && $confirm_text ne '') {
 		my $msg = js_escape($confirm_text);
-		$confirm_js = "if (!confirm(\\\"$msg\\\")) return false; ";
+		$confirm_attr = " onclick=\\\"return confirm('".$msg."');\\\"";
 	}
 	my $rv = "<form id='".h($id)."' action='".h($script)."' method='post' style='display:inline; margin:0; padding:0;'>";
 	foreach my $k (sort keys %{$params}) {
 		$rv .= ui_hidden($k, $params->{$k});
 	}
 	$rv .= ui_csrf_hidden();
+	$rv .= "<button type='submit' style='background:none;border:none;padding:0;margin:0;color:#06c;text-decoration:underline;cursor:pointer;font:inherit;line-height:inherit;'".$confirm_attr.">".h($label)."</button>";
 	$rv .= "</form>";
-	$rv .= "<a href='#' onClick=\"".$confirm_js."document.getElementById('".h($id)."').submit(); return false;\">".h($label)."</a>";
 	return $rv;
 }
 
@@ -1091,7 +1091,11 @@ foreach my $key (sort(keys %zfs_info))
     my $health = $details->{health} || 'UNKNOWN';
     my $raid = $details->{raid} || 'BASIC';
     
-    my $pool_col = "<a href='".$action.u($key)."'>".h($key)."</a><br><small>".h($raid)."-".h($health)."</small>";
+    my $pool_href = $action.u($key);
+    if ($pool_href !~ /(?:^|[?&])xnavigation=/) {
+        $pool_href .= ($pool_href =~ /\?/) ? '&xnavigation=1' : '?xnavigation=1';
+    }
+    my $pool_col = "<a href='".$pool_href."'>".h($key)."</a><br><small>".h($raid)."-".h($health)."</small>";
 
     my @vals = ($pool_col, $size_val, $alloc_val, $free_val);
     # Add the other properties from zpool list
@@ -1128,7 +1132,11 @@ foreach $key (sort(keys %zfs))
 		}
 		push(@vals, $val);
 	}
-    	print ui_columns_row(["<a href='".$action.u($key)."'>".h($key)."</a>", @vals ]);
+    	my $zfs_href = $action.u($key);
+    	if ($zfs_href !~ /(?:^|[?&])xnavigation=/) {
+    		$zfs_href .= ($zfs_href =~ /\?/) ? '&xnavigation=1' : '?xnavigation=1';
+    	}
+    	print ui_columns_row(["<a href='".$zfs_href."'>".h($key)."</a>", @vals ]);
 }
 print ui_columns_end();
 }
