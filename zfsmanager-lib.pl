@@ -148,7 +148,7 @@ sub is_valid_zfs_name
 {
 	my ($name) = @_;
 	return 0 if (!defined $name || $name eq '');
-	return $name =~ /^[a-zA-Z0-9._\-\/\@]+$/ ? 1 : 0;
+	return $name =~ /^[a-zA-Z0-9._\-\/\@:]+$/ ? 1 : 0;
 }
 
 sub is_valid_property_name

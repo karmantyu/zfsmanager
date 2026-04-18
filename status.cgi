@@ -252,7 +252,7 @@ ui_print_footer('index.cgi?xnavigation=1', $text{'index_return'});
 #show filesystem status
 if ($in{'zfs'})
 {
-	if ($in{'zfs'} !~ /^[a-zA-Z0-9\.\-\_\/\@]+$/) { error($text{'error_invalid_zfs'} || "Invalid filesystem name"); }
+	if (!is_valid_zfs_name($in{'zfs'})) { error($text{'error_invalid_zfs'} || "Invalid filesystem name"); }
 	ui_print_header(undef, "ZFS File System", "", undef, 1, 1);
 	#start status tab
 	ui_zfs_list($in{'zfs'});
@@ -306,7 +306,7 @@ if ($in{'zfs'})
 #show status of current snapshot
 if ($in{'snap'})
 {
-	if ($in{'snap'} !~ /^[a-zA-Z0-9\.\-\_\/\@]+$/) { error($text{'error_invalid_snap'} || "Invalid snapshot name"); }
+	if (!is_valid_zfs_name($in{'snap'})) { error($text{'error_invalid_snap'} || "Invalid snapshot name"); }
 	ui_print_header(undef, $text{'snapshot_title'}, "", undef, 1, 1);
 	%snapshot = list_snapshots($in{'snap'});
 	print ui_columns_start([ "Snapshot", "Used", "Refer" ]);
