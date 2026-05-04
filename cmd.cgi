@@ -90,6 +90,7 @@ if ($text{$in{'cmd'}."_desc"}) {
 };
 
 print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
+my $cmd_table_open = 1;
 	
 if ($in{'cmd'} eq "setzfs") {
 	$in{'confirm'} = "yes";
@@ -229,8 +230,8 @@ elsif ($in{'cmd'} eq "rename")  {
 		if ($in{'confirm'}) { @footer = ('status.cgi?zfs='.u($target).'&xnavigation=1', h($target)); }
 	}
 	print ui_table_end();
+	$cmd_table_open = 0;
 	ui_cmd($in{'zfs'}." to ".$in{'name'}, $cmd);
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} eq "createzpool")  {
 	my %createopts = create_opts();
@@ -335,9 +336,9 @@ elsif ($in{'cmd'} eq "vdev") {
 }
 elsif ($in{'cmd'} eq "promote") {
 	print ui_table_end();
+	$cmd_table_open = 0;
 	my $cmd = "zfs promote ".shell_quote($in{'zfs'});
 	ui_cmd($in{'zfs'}, $cmd);
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} eq "scrub") {
 	$in{'confirm'} = "yes";
@@ -348,12 +349,13 @@ elsif ($in{'cmd'} eq "scrub") {
 elsif ($in{'cmd'} eq "upgrade") {
 	print "<p>".$text{'zpool_upgrade_msg'}."</p>";
 	print ui_table_end();
+	$cmd_table_open = 0;
 	my $cmd = "zpool upgrade ".shell_quote($in{'pool'});
 	ui_cmd($in{'pool'}, $cmd);
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} eq "export") {
 	print ui_table_end();
+	$cmd_table_open = 0;
 	my $q_pool = shell_quote($in{'pool'});
 	my $q_force = ($in{'force'} && $in{'force'} =~ /-f/) ? "-f " : "";
 	if (!$in{'confirm'}) {
@@ -372,7 +374,6 @@ elsif ($in{'cmd'} eq "export") {
 		my $cmd = "zpool export $q_force$q_pool";
 		ui_cmd($in{'pool'}, $cmd);
 	}
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 	@footer = ("index.cgi?mode=pools&xnavigation=1", $text{'index_return'});
 }
 elsif ($in{'cmd'} eq "import")  {
@@ -382,6 +383,7 @@ elsif ($in{'cmd'} eq "import")  {
 	}
 	if ($in{'destroyed'}) { $dir .= " -D -f "; }
 	print ui_table_end();
+	$cmd_table_open = 0;
 	my $import = $in{'import'};
 	$import =~ s/^\s+|\s+$//g;
 	my $q_force = ($in{'force'} && $in{'force'} =~ /-f/) ? "-f " : "";
@@ -403,14 +405,13 @@ elsif ($in{'cmd'} eq "import")  {
 		my $cmd = ($config{'pool_properties'} =~ /1/ ) ? "zpool import".$dir." ".$q_force.shell_quote($import): undef;
 		ui_cmd($in{'import'}, $cmd);
 	}
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 	@footer = ("index.cgi?mode=pools&xnavigation=1", $text{'index_return'});
 }
 elsif ($in{'cmd'} eq "zfsact")  {
 	print ui_table_end();
+	$cmd_table_open = 0;
 	my $cmd = "zfs ".shell_quote($in{'action'})." ".shell_quote($in{'zfs'});
 	ui_cmd("$in{'action'} $in{'zfs'}", $cmd);
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 }
 elsif ($in{'cmd'} eq "zfsdestroy")  {
 	my $q_force = ($in{'force'} && $in{'force'} =~ /-r/) ? "-r " : "";
@@ -455,8 +456,8 @@ elsif ($in{'cmd'} eq "pooldestroy")  {
 	my $q_pool = shell_quote($in{'pool'});
 	my $cmd = "zpool destroy $q_force$q_pool";
 	print ui_table_end();
+	$cmd_table_open = 0;
 	ui_cmd($in{'pool'}, $cmd, 60);
-	print ui_table_start($text{'cmd_title'}, "width=100%", "10", ['align=left'] );
 	@footer = ("index.cgi?mode=pools&xnavigation=1", $text{'index_return'});
 }
 elsif ($in{'cmd'} eq "multisnap")  {
@@ -552,7 +553,7 @@ elsif ($in{'cmd'} eq "replace") {
 	}
 }
 
-print ui_table_end();
+print ui_table_end() if $cmd_table_open;
 if (@footer) { ui_print_footer(@footer); }
 if ($in{'zfs'} && !@footer) {
 		print "<br />";

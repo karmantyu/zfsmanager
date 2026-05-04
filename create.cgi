@@ -634,11 +634,13 @@ EOF
 		@footer = ("status.cgi?snap=".u($in{'rename'})."&xnavigation=1", h($in{'rename'}));
 	} elsif (index($in{'rename'}, '/') != -1) {
         #is filesystem
-		$parent = $parent{'pool'};
+		$parent = $parent{'filesystem'};
+		my $name = $in{'rename'};
+		$name =~ s!.*/!!;
 		ui_zfs_list("-r ".$in{'rename'});
 		print ui_table_start('Rename filesystem', 'width=100%', '6');
                 print ui_table_row(undef, '<b>Filesystem:</b> '.h($in{'rename'}));
-                print ui_table_row(undef, "<b>New Name: </b>".$parent."/".ui_textbox('name', undef, 35));
+                print ui_table_row(undef, "<b>New Name: </b>".h($parent)."/".ui_textbox('name', $name, 35));
 		print ui_table_row(undef, ui_checkbox("prnt", "-p ", "Create all the nonexistent parent datasets."));
 	}
 	print ui_table_row(undef, ui_checkbox("force", "-f ", "Force unmount any filesystems that need to be unmounted in the process.", 1));
