@@ -3,6 +3,14 @@
 require './zfsmanager-lib.pl';
 ReadParse();
 
+if (!$in{'cmd'}) {
+	my @params = grep { $_ ne 'xnavigation' } keys %in;
+	if (!@params) {
+		redirect("index.cgi?xnavigation=1");
+		exit;
+	}
+}
+
 my %allowed_cmd = map { $_ => 1 } qw(
 	setzfs setpool snapshot send createzfs clone rename createzpool
 	vdev promote scrub upgrade export import zfsact zfsdestroy
