@@ -655,9 +655,12 @@ EOF
 <script type="text/javascript">
 function validateRename(form) {
 	var name = form.name.value;
-	var nameRegex = /^[a-zA-Z0-9_\\-.:]+\$/;
-	if (!name || !nameRegex.test(name)) {
-		alert("Invalid Name. Please use alphanumeric characters, -, _, ., or :");
+	var isSnapshot = form.zfs.value.indexOf('@') !== -1;
+	var nameRegex = isSnapshot ? /^[a-zA-Z0-9_\\-.:]+\$/ : /^[a-zA-Z0-9_\\-./:]+\$/;
+	if (!name || !nameRegex.test(name) || (!isSnapshot && (/^\\//.test(name) || /\\/\$/.test(name) || /\\/\\//.test(name) || /@/.test(name)))) {
+		alert(isSnapshot
+			? "Invalid Name. Please use alphanumeric characters, -, _, ., or :"
+			: "Invalid Name. Please use alphanumeric characters, /, -, _, ., or :");
 		return false;
 	}
 	return true;

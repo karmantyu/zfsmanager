@@ -57,7 +57,7 @@ if ($in{'property'} && !is_valid_property_name($in{'property'})) { error($text{'
 if ($in{'vdev'} && !is_valid_vdev_name($in{'vdev'})) { error("Invalid virtual device name"); }
 if ($in{'new'} && !is_valid_vdev_name($in{'new'})) { error("Invalid replacement device"); }
 if ($in{'action'} && !is_valid_action_name($in{'action'})) { error("Invalid action"); }
-if ($in{'name'} && $in{'name'} !~ /^[a-zA-Z0-9_\-.:]+$/) { error("Invalid name"); }
+if ($in{'name'} && $in{'cmd'} ne 'rename' && $in{'name'} !~ /^[a-zA-Z0-9_\-.:]+$/) { error("Invalid name"); }
 if ($in{'file'} && $in{'file'} !~ /^[a-zA-Z0-9._-]+$/) { error("Invalid filename"); }
 if ($in{'dest'} && ($in{'dest'} !~ m{^/} || $in{'dest'} =~ /[\r\n\0]/)) { error("Invalid destination path"); }
 if ($in{'dir'} && $in{'dir'} =~ /[\r\n\0]/) { error("Invalid import path"); }
@@ -69,8 +69,15 @@ if ($in{'cmd'} eq 'import' && $in{'import'} && $in{'import'} !~ /^[a-zA-Z0-9._:-
 if ($in{'cmd'} eq 'snapshot' && $in{'snap'} && $in{'snap'} !~ /^[a-zA-Z0-9._:-]+$/) { error("Invalid snapshot name"); }
 if ($in{'cmd'} eq 'send' && $in{'snap'} && index($in{'snap'}, '@') == -1) { error("Invalid snapshot name"); }
 if ($in{'cmd'} eq 'snpdestroy' && $in{'snapshot'} && index($in{'snapshot'}, '@') == -1) { error("Invalid snapshot name"); }
-if (($in{'cmd'} eq 'createzfs' || $in{'cmd'} eq 'clone' || $in{'cmd'} eq 'rename') && $in{'name'} && $in{'name'} !~ /^[a-zA-Z0-9_\-.:]+$/) { error("Invalid dataset name"); }
+if (($in{'cmd'} eq 'createzfs' || $in{'cmd'} eq 'clone') && $in{'name'} && $in{'name'} !~ /^[a-zA-Z0-9_\-.:]+$/) { error("Invalid dataset name"); }
 if (($in{'cmd'} eq 'createzfs' || $in{'cmd'} eq 'clone') && $in{'zfs'} && $in{'zfs'} !~ /^[a-zA-Z0-9_\-.:]+$/) { error("Invalid dataset name"); }
+if ($in{'cmd'} eq 'rename' && $in{'name'}) {
+	if (index($in{'zfs'} || '', '@') != -1) {
+		if ($in{'name'} !~ /^[a-zA-Z0-9_\-.:]+$/) { error("Invalid snapshot name"); }
+	} else {
+		if (!is_valid_zfs_name($in{'name'}) || $in{'name'} =~ m{(^/|/$|//|@)}) { error("Invalid dataset name"); }
+	}
+}
 
 if ($in{'cmd'} eq 'setzfs' && (!$in{'zfs'} || !$in{'property'})) { error("Missing zfs/property"); }
 if ($in{'cmd'} eq 'setpool' && (!$in{'pool'} || !$in{'property'})) { error("Missing pool/property"); }
@@ -185,10 +192,17 @@ elsif ($in{'cmd'} eq "createzfs")  {
 		}
 	}
 	$in{'confirm'} = "yes";
-	ui_cmd("$in{'parent'}/$in{'zfs'}", $cmd);
+	my $success = ui_cmd("$in{'parent'}/$in{'zfs'}", $cmd);
 	#print "", (!$result[1]) ? ui_zfs_list($in{'zfs'}) : undef;
 	#^^^this doesn't work for some reason
-	@footer = ("status.cgi?zfs=".u($in{'parent'}."/".$in{'zfs'})."&xnavigation=1", h($in{'parent'}."/".$in{'zfs'}));
+	if ($success) {
+		@footer = (
+			"status.cgi?zfs=".u($in{'parent'}."/".$in{'zfs'})."&xnavigation=1", h($in{'parent'}."/".$in{'zfs'}),
+			"status.cgi?zfs=".u($in{'parent'})."&xnavigation=1", h($in{'parent'})
+		);
+	} else {
+		@footer = ("status.cgi?zfs=".u($in{'parent'})."&xnavigation=1", h($in{'parent'}));
+	}
 }
 elsif ($in{'cmd'} eq "clone")  {
 	my %createopts = create_opts();
@@ -228,18 +242,29 @@ elsif ($in{'cmd'} eq "rename")  {
 	my $q_force = ($in{'force'} && $in{'force'} =~ /-f/) ? "-f " : "";
 	my $q_recurse = ($in{'recurse'} && $in{'recurse'} =~ /-r/) ? "-r " : "";
 	my $q_prnt = ($in{'prnt'} && $in{'prnt'} =~ /-p/) ? "-p " : "";
+	my $target = undef;
+	my $target_type = undef;
 	if (index($in{'zfs'}, '@') != -1) { 
-		my $target = $in{'parent'}.'@'.$in{'name'};
+		$target = $in{'parent'}.'@'.$in{'name'};
+		$target_type = 'snap';
 		$cmd = "zfs rename ".$q_force.$q_recurse.$q_zfs." ".shell_quote($target);
-		@footer = ('status.cgi?snap='.u($target).'&xnavigation=1', h($target));
 	} elsif (index($in{'zfs'}, '/') != -1) { 
-		my $target = $in{'parent'}.'/'.$in{'name'};
+		$target = $in{'parent'}.'/'.$in{'name'};
+		$target_type = 'zfs';
 		$cmd = "zfs rename ".$q_force.$q_prnt.$q_zfs." ".shell_quote($target);
-		if ($in{'confirm'}) { @footer = ('status.cgi?zfs='.u($target).'&xnavigation=1', h($target)); }
 	}
 	print ui_table_end();
 	$cmd_table_open = 0;
-	ui_cmd($in{'zfs'}." to ".$in{'name'}, $cmd);
+	my $success = ui_cmd($in{'zfs'}." to ".$in{'name'}, $cmd);
+	if ($success && $target_type eq 'snap') {
+		@footer = ('status.cgi?snap='.u($target).'&xnavigation=1', h($target));
+	} elsif ($success && $target_type eq 'zfs') {
+		@footer = ('status.cgi?zfs='.u($target).'&xnavigation=1', h($target));
+	} elsif (index($in{'zfs'}, '@') != -1) {
+		@footer = ('status.cgi?snap='.u($in{'zfs'}).'&xnavigation=1', h($in{'zfs'}));
+	} else {
+		@footer = ('status.cgi?zfs='.u($in{'zfs'}).'&xnavigation=1', h($in{'zfs'}));
+	}
 }
 elsif ($in{'cmd'} eq "createzpool")  {
 	my %createopts = create_opts();

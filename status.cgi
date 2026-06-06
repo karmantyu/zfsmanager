@@ -298,7 +298,15 @@ if ($in{'zfs'})
 		print ui_table_row("Info", "No actions available for your ACL.");
 	}
 	print ui_table_end();
-	ui_print_footer('index.cgi?mode=zfs&xnavigation=1', $text{'zfs_return'});
+	if (index($in{'zfs'}, '/') != -1) {
+		my %parent = find_parent($in{'zfs'});
+		ui_print_footer(
+			'index.cgi?mode=zfs&xnavigation=1', $text{'zfs_return'},
+			'status.cgi?zfs='.u($parent{'filesystem'}).'&xnavigation=1', h($parent{'filesystem'})
+		);
+	} else {
+		ui_print_footer('index.cgi?mode=zfs&xnavigation=1', $text{'zfs_return'});
+	}
 	
 }
 

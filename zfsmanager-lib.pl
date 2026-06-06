@@ -1288,10 +1288,13 @@ if (!$in{'confirm'}) {
 	print "<h3>Would you like to continue?</h3>\n";
 	print ui_submit("yes")."<br />";
 	print ui_form_end();
+	print "<br />";
+	return undef;
 } else {
 	my @result;
 	my $exit = 0;
 	my $timed_out = 0;
+	my $success = 0;
 	if ($timeout) {
 		($exit, $timed_out, @result) = run_cmd_with_timeout($cmd, $timeout);
 	} else {
@@ -1302,13 +1305,15 @@ if (!$in{'confirm'}) {
 		foreach $key (@result) { print h($key)."<br />\n"; }
 	} elsif ($timeout ? ($exit == 0) : !$result[0]) {
 		print "Success! <br />\n";
+		$success = 1;
 	} else	{
 		my $err = $result[0] || "Command failed.";
 		print "<b>error: </b>".h($err)."<br />\n";
 		foreach $key (@result[1..@result]) { print h($key)."<br />\n"; }
 	}
+	print "<br />";
+	return $success;
 }
-print "<br />";
 }
 
 sub run_cmd_with_timeout
