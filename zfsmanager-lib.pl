@@ -234,9 +234,9 @@ return %list;
 
 sub pool_properties_list
 {
-my %list = ('autoexpand' => 'boolean', 'autoreplace' => 'boolean', 'delegation' => 'boolean', 'listsnapshots' => 'boolean', 
-			'failmode' => 'wait, continue, panic', 'feature@async_destroy' => 'enabled, disabled', 'feature@empty_bpobj' => 'enabled, disabled', 'feature@lz4_compress' => 'enabled, disabled', 'feature@embedded_data' => 'enabled, disabled', 'feature@enabled_txg' => 'enabled, disabled', 'feature@bookmarks' => 'enabled, disabled', 'feature@hole_birth' => 'enabled, disabled', 'feature@spacemap_histogram' => 'enabled, disabled', 'feature@extensible_dataset' => 'enabled, disabled', 'feature@large_blocks' => 'enabled, disabled', 'feature@filesystem_limits' => 'enabled, disabled',
-			'altroot' => 'special', 'bootfs' => 'special', 'cachefile' => 'special', 'comment' => 'special');
+my %list = ('autoexpand' => 'boolean', 'autoreplace' => 'boolean', 'autotrim' => 'boolean', 'delegation' => 'boolean', 'listsnapshots' => 'boolean', 'multihost' => 'boolean',
+			'failmode' => 'wait, continue, panic', 'compatibility' => 'text', 'dedup_table_quota' => 'text',
+			'altroot' => 'text', 'bootfs' => 'text', 'cachefile' => 'text', 'comment' => 'text', 'version' => 'text');
 return %list;
 }
 
@@ -250,13 +250,14 @@ if (!%doc_props) {
 			$doc_props{$1} = 1;
 		}
 	}
+	$doc_props{'feature@*'} = 1;
 	my %zfs_props = properties_list();
 	my %pool_props = pool_properties_list();
 	foreach my $k (keys %zfs_props, keys %pool_props) {
 		$doc_props{$k} = 1;
 	}
 }
-return $doc_props{$property} ? 1 : 0;
+return ($doc_props{$property} || $property =~ /^feature@[A-Za-z0-9_]+$/) ? 1 : 0;
 }
 
 sub create_opts #options and defaults when creating new pool or filesystem
@@ -360,6 +361,7 @@ if ($zfs) {
 	return 0;
 }
 return 0 if (!has_acl_permission('upool_properties'));
+return 1 if ($property =~ /^feature@[A-Za-z0-9_]+$/ && $config{'pool_properties'} =~ /1/);
 if (($pool_props{$property}) && ($config{'pool_properties'} =~ /1/)) { return 1; }
 return 0;
 }

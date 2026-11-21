@@ -33,9 +33,16 @@ my $desc = undef;
 if ($text{'prop_'.$in{'property'}}) {
 	$desc = $text{'prop_'.$in{'property'}};
 }
+if (!$desc && $in{'property'} =~ /^feature@([A-Za-z0-9_]+)$/) {
+	$desc = "Pool feature flag for $1. Setting it to enabled permits this ZFS feature to be used. Feature flags cannot be disabled once enabled; enabling a feature may also enable its dependencies.";
+}
 if ($desc) {
 	print "<b>Description:</b><br />";
-	print h($desc);
+	my $safe_desc = h($desc);
+	# Property descriptions are plain text with optional line-break markup.
+	# Escape everything first, then restore only the supported <br> tags.
+	$safe_desc =~ s/&lt;br\s*\/?&gt;/<br \/>/ig;
+	print $safe_desc;
 	print "<br />";
 	print "<br />";
 }
@@ -66,9 +73,10 @@ if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} 
 		print ui_hidden('action', 'mount');
 		print ui_submit('Mount this file system');
 	}
-} elsif ($in{'property'} =~ 'comment') {
+} elsif ($pool_proplist{$in{'property'}} eq 'text') {
 	print ui_hidden('cmd', 'setpool') ;
-	print "Comment (limited to 32 characters): ".ui_textbox('set', $get{$in{'pool'}}{$in{'property'}}{value}, 32)."<br />";
+	my $maxlen = $in{'property'} eq 'comment' ? 32 : 0;
+	print "Set ".h($in{'property'}).": ".ui_textbox('set', $get{$in{'pool'}}{$in{'property'}}{value}, $maxlen)."<br />";
 	print ui_submit('submit', "<br />");
 
 } elsif ($in{'property'} =~ 'sharesmb') {
@@ -77,9 +85,8 @@ if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} 
 
 } elsif ($in{'property'} =~ 'utf8only') {
 
-} elsif ($proplist{$in{'property'}} =~ 'text') {
-
-	print "", ($in{'zfs'}) ? ui_hidden('cmd', 'setzfs') : "";
+} elsif ($proplist{$in{'property'}} =~ 'text' || $pool_proplist{$in{'property'}} eq 'text') {
+	print "", ($in{'zfs'}) ? ui_hidden('cmd', 'setzfs') : ui_hidden('cmd', 'setpool');
 	print "Set ".h($in{'property'}).": ".ui_textbox('set', $get{$in{'zfs'}}{$in{'property'}}{value});
 	print ui_submit('submit'), "<br />";
 
@@ -88,7 +95,7 @@ if ($in{'property'} =~ 'keystatus' and $get{$in{'zfs'}}{$in{'property'}}{value} 
 } elsif ($in{'property'} =~ /feature@/) {
 	print ui_hidden('cmd', 'setpool');
 	if ($get{$in{'pool'}}{$in{'property'}}{value} =~ 'disabled') {
-	my @select = ['enabled', 'disabled']; 
+	my @select = ['enabled'];
 	print "Change to: ", ui_select('set', $get{$in{'pool'}}{$in{'property'}}{value}, @select, 1, 0, 1); 
 	print "<br />";
 	print ui_submit('submit');
