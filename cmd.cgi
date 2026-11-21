@@ -141,7 +141,7 @@ elsif ($in{'cmd'} eq "send") {
 		my $newfile = $in{'snap'} =~ s![/@]!_!gr;
 		print "<b>$text{'destination'} </b>".ui_filebox('dest', $config{'last_send'}, 35, undef, undef, undef, 1)."<br />";
 		print "<b>$text{'filename'} </b>".ui_textbox('file', $newfile.'.gz', 50)."<br />";
-		print "<input type='submit' name='continue_btn' id='continue_btn' value=\"".quote_escape($text{'continue'})."\">";
+				print "<input type='submit' name='continue_btn' id='continue_btn' value=\"".quote_escape($text{'continue'})."\">";
                 print ui_form_end();
 	} else { 
 		$in{'confirm'} = "yes";
@@ -475,7 +475,7 @@ elsif ($in{'cmd'} eq "snpdestroy")  {
 		print ui_checkbox('confirm', 'yes', $text{'cmd_understand'}, undef );
 		if ($in{'submitted'} && $in{'confirm'} ne 'yes') { print " <font color='red'> -- $text{'cmd_checkbox'}</font>"; }
 		print "<br /><br />";
-		print "<input type='submit' name='continue_btn' id='continue_btn' value=\"".quote_escape($text{'continue'})."\">";
+		print ui_submit($text{'continue'}, 'continue_btn');
 		print ui_form_end();
 
 	} else {
@@ -544,10 +544,10 @@ elsif ($in{'cmd'} eq "multisnap")  {
 		}	
 		print "<h3>$text{'cmd_warning'}</h3>";
 		print ui_checkbox('confirm', 'yes', $text{'cmd_understand'}, undef );
-		print ui_hidden('checked', 'no');
-		if ($in{'checked'} =~ /no/) { print " <font color='red'> -- $text{'cmd_checkbox'}</font>"; }
+		print ui_hidden('submitted', '1');
+		if ($in{'submitted'} && $in{'confirm'} ne 'yes') { print " <font color='red'> -- $text{'cmd_checkbox'}</font>"; }
 		print "<br /><br />";
-		print "<input type='submit' name='continue_btn' id='continue_btn' value=\"".quote_escape($text{'continue'})."\"> ";
+		print ui_submit($text{'continue'}, 'continue_btn'), " ";
 		print "<input type='button' name='cancel_btn' id='cancel_btn' value='Cancel' onclick=\"window.location.href='index.cgi?mode=snapshot&xnavigation=1'; return false;\">";
 		print ui_form_end();
 	} else {
